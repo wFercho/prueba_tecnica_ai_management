@@ -1,0 +1,28 @@
+# The build context is the whole repository, because the image needs the backend,
+# the frontend and the delivered CSVs. Everything below is either rebuilt inside the
+# image or would invalidate its layer cache on every change.
+
+# Version control and agent tooling: never in a runtime image.
+.git
+.gitignore
+.github
+.opencode
+.agents
+.scratch
+skills-lock.json
+AGENTS.md
+CONTEXT.md
+Prueba_Tecnica_AI_Energy_Management.docx (1).md
+Prueba_Tecnica_AI_Energy_Management.docx (1).pdf
+*.md
+!data/*.md
+
+# Dependencies are installed inside the image against the lockfiles, so a host
+# node_modules would only shadow them with a different platform's build.
+frontend/node_modules
+frontend/dist
+
+# Go's build cache and the binaries a host build leaves behind.
+backend/bin
+backend/data
+backend/.env

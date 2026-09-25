@@ -1,0 +1,139 @@
+# The whole stack: a database, the API that serves the dashboard, and the two
+# one-shot jobs the README walks through — importing the delivered CSVs and running
+# the test suite against a throwaway database.
+#
+# Everything runs in Docker, so a clean checkout needs only Docker to run the MVP:
+#   docker compose up -d --build        # database and API
+#   docker compose run --rm seed        # import the delivered data
+#   make analyze                        # run the detector
+#   open http://localhost:8090
+#
+# The host needs no Go, no Node and no PostgreSQL client.
+
+name: energy-anomaly-mvp
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: energy
+      POSTGRES_USER: energy
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-energy}
+      # The database is UTC, which is what the ingest and the detector both assume.
+      # Setting it here means a row's hour is the same hour in the database as it
+      # is in the CSV, whatever the host's zone is.
+      TZ: UTC
+      PGTZ: UTC
+    healthcheck:
+      # pg_isready is the check that matters: the API must not start against a
+      # database that is accepting connections but has not finished its first boot.
+      test: ["CMD-SHELL", "pg_isready -U energy -d energy"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    ports:
+      # Local-only by default: the demo database uses a known password. The
+      # port is not 5432 so it does not fight a host PostgreSQL installation.
+      - "${BIND_HOST:-127.0.0.1}:${DB_PORT:-55433}:5432"
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://energy:${DB_PASSWORD:-energy}@db:5432/energy?sslmode=disable
+      PORT: "8080"
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      # Narration is optional. With no key the API explains anomalies from the rules
+      # alone, which is a supported deployment rather than a degraded one.
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+    ports:
+      - "${BIND_HOST:-127.0.0.1}:${API_PORT:-8090}:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/meters"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 3s
+    restart: unless-stopped
+
+  # The initial data load, as its own step. It is a one-shot job rather than
+  # something the API does on boot, so that importing is a visible, repeatable act
+  # and the API never silently rewrites the database.
+  seed:
+    profiles: ["seed"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    entrypoint: ["/app/seed"]
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://energy:${DB_PASSWORD:-energy}@db:5432/energy?sslmode=disable
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    restart: "no"
+
+  # The test suite, run in the same Go toolchain the image is built with, against a
+  # database of its own. It has its own service because the API's database is
+  # disposable and this one must be wiped between runs.
+  db-test:
+    profiles: ["test"]
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: energy_test
+      POSTGRES_USER: energy
+      POSTGRES_PASSWORD: energy
+      TZ: UTC
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U energy -d energy_test"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    restart: "no"
+
+  tests:
+    profiles: ["test"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: tests
+    depends_on:
+      db-test:
+        condition: service_healthy
+    environment:
+      TEST_DATABASE_URL: postgres://energy:energy@db-test:5432/energy_test?sslmode=disable
+    command: ["go", "test", "-race", "-count=1", "./..."]
+    restart: "no"
+
+  # A contract walk of the running API, checking the fields the dashboard reads. It
+  # needs the stack up, so it is a separate step: `make smoke`.
+  smoke:
+    profiles: ["smoke"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: frontend
+    working_dir: /src/frontend
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      API_URL: http://api:8080
+    command: ["node", "smoke.mjs"]
+    restart: "no"
+
+volumes:
+  db-data:

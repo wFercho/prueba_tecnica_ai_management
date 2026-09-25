@@ -1,0 +1,27 @@
+# Dependencies and build output. Everything the app needs is built inside Docker
+# (see the Dockerfile), so nothing here belongs in the repository.
+
+node_modules/
+frontend/dist/
+backend/bin/
+backend/seed
+
+# Go
+*.test
+*.out
+
+# Local environment. The compose file reads these from the host environment, and the
+# one secret in this project — OPENAI_API_KEY — has no business in a file that gets
+# committed by accident.
+.env
+.env.*
+!.env.example
+
+# Agent tooling installed by the repo's own skills
+.opencode/node_modules/
+
+# Editor and OS noise
+.DS_Store
+.idea/
+.vscode/
+*.swp
