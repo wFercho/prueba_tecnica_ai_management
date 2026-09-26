@@ -138,6 +138,89 @@ terminal de administración local.
 | `GET` | `/ai/analysis/{id}` | Estado de detección y narración de ese run |
 | `GET` | `/dashboard/summary` | KPIs, medidores, último intento y último éxito |
 
+## Modelo de datos
+
+Vocabulario de `CONTEXT.md`, entre paréntesis la tabla física. Nombres y
+ubicaciones de medidores son metadatos sintéticos.
+
+```mermaid
+erDiagram
+    meters ||--o{ readings : tiene
+    meters ||--o{ events : reporta
+    analysis_runs ||--o{ anomalies : contiene
+    meters ||--o{ anomalies : afecta
+    meters {
+        TEXT meter_id
+        TEXT name
+        TEXT location
+    }
+    readings {
+        TEXT meter_id
+        TIMESTAMPTZ timestamp
+        DOUBLE consumption_kwh
+        DOUBLE voltage_v
+        DOUBLE current_a
+        DOUBLE power_factor
+        TEXT status
+    }
+    events {
+        TEXT meter_id
+        TIMESTAMPTZ timestamp
+        TEXT type
+        TEXT description
+    }
+    analysis_runs {
+        INT id
+        TEXT state
+        TIMESTAMPTZ window_start
+        TIMESTAMPTZ window_end
+    }
+    anomalies {
+        INT run_id
+        TEXT meter_id
+        TIMESTAMPTZ window_start
+        TEXT type
+        TEXT severity
+        DOUBLE confidence
+    }
+```
+
+| Concepto (tabla) | Clave / identidad | Nota |
+| --- | --- | --- |
+| Medidor (`meters`) | `UNIQUE(meter_id)` | Identidad estable (`M-101`…); `name/location` sintéticos |
+| Lectura (`readings`) | `UNIQUE(meter_id, timestamp)` | Una hora medida por medidor; `status` es lo que afirmó la fuente (`OK` en las 4.032 filas), nunca el veredicto |
+| Reporte de contexto (`events`) | `UNIQUE(meter_id, timestamp, type)` | Reimporte idempotente; `UNKNOWN` es reporte de ausencia, no explicación |
+| Run (`analysis_runs`) | `window_start/end` del dataset | `COMPLETED` = detección lista; la narración puede seguir pendiente |
+| Anomalía (`anomalies`) | `UNIQUE(run_id, meter_id, window_start)` | Un episodio clasificado; reintentar el análisis crea un run nuevo, no duplica filas |
+| Evidencia persistida (`anomalies.confidence_basis/deviation_series/correlated_event/findings`) | JSONB por fila | Serie que juzgó el detector, congelada; no se recalcula en lectura |
+| Explicación (`anomalies.reason/recommended_action`) | `explanation_source/status` | Siempre hay prosa por reglas en español; LLM solo puede reescribirla |
+| Cuentas (`users/sessions`) | Fuera del dominio | `make seed` las conserva y reemplaza el resto en una transacción |
+
+## Cómo se genera el análisis («análisis IA»)
+
+Dos fases con nombres canónicos: **detección determinista** (decide) y
+**narración LLM opcional** (redacta, no decide).
+
+```mermaid
+flowchart TD
+    A["POST /ai/analyze<br/>StartRun RUNNING"] --> B["detect: AllReadings + Events"]
+    B --> C["Analyze por medidor ordenado"]
+    C --> D["FindConsumptionEpisodes<br/>baseline: mediana por hora del mismo medidor,<br/>historia limpia, min 3 muestras, congelada"]
+    C --> E["FindDataQualityEpisodes<br/>consistencia fisica V/I/PF"]
+    D --> F["Correlate: eventos -24h"]
+    E --> F
+    F --> G["Classify: tipo + severidad + confianza 4 terminos<br/>+ prosa por reglas en español"]
+    G --> H["SaveAnomalies + FinishRun COMPLETED<br/>202 con el run"]
+    H --> I{"OPENAI_API_KEY?"}
+    I -- "no" --> J["rules/READY"]
+    I -- "si" --> K["narrateRun en background, por fila<br/>solo reescribe reason/action en español<br/>si falla, conserva reglas FAILED"]
+```
+
+Baseline en una línea: esperado de ese medidor a esa hora
+(`M-106 00h = 42.110 kWh`, mediana de sus `00h` limpias); `08/09 00h = 8.2`
+es `-80.5%`, episodio `00-11h -79.8%`, explicado por `SCHEDULED_OUTAGE`
+→ `FALSE_POSITIVE/LOW`.
+
 ## Configuración
 
 La pila funciona sin `.env`. Compose lee variables exportadas o un `.env` local
