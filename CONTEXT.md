@@ -68,6 +68,10 @@ _Avoid_: probability, likelihood, certainty, trust
 One of the four kinds of evidence behind confidence: `deviation`, `event_match`, `corroboration`, `persistence`.
 _Avoid_: factor, feature, signal, weight
 
+**Variables que corroboran**:
+The independent measurements that moved with an episode (`consumption`, `current`, `voltage`, `power_factor`, `energy_balance`), displayed with Spanish labels. Distinct from the `corroboration` evidence term behind the confidence score.
+_Avoid_: corroboración (for the list), signals, features
+
 **Quality finding**:
 A specific observation supporting a data-quality episode, such as a physically inconsistent electrical value or repeated abnormal readings, with the offending values and time distinguished from the score's four evidence terms.
 _Avoid_: confidence basis, source status, anomaly type

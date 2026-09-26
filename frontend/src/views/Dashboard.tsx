@@ -111,23 +111,25 @@ export function Dashboard() {
         <p className="notice error" role="alert">No se pudo completar el análisis. Inténtalo de nuevo.</p>
       )}
 
-      <div className="grid split">
-        <div>
-          <div className="card">
-            <h2>Hallazgos, por urgencia</h2>
-            {anomalies.length === 0 ? (
-              <p className="empty">
-                {lastSuccessful ? 'No hay anomalías en el último análisis exitoso.' : 'Pendiente de análisis: aún no hay resultados.'}
-              </p>
-            ) : (
-              <AnomalyTable anomalies={anomalies} />
-            )}
-          </div>
-        </div>
+      <div className="card">
+        <h2>Hallazgos, por urgencia</h2>
+        {anomalies.length === 0 ? (
+          <p className="empty">
+            {lastSuccessful ? 'No hay anomalías en el último análisis exitoso.' : 'Pendiente de análisis: aún no hay resultados.'}
+          </p>
+        ) : (
+          <AnomalyTable anomalies={anomalies} />
+        )}
+      </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <div className="card">
-            <h2>Análisis</h2>
+      <div className="card">
+        <h2>Medidores</h2>
+        <MeterTable meters={summary.meters} />
+      </div>
+
+      <div className="grid items-start gap-4 md:grid-cols-2">
+        <div className="card">
+          <h2>Análisis</h2>
             <button
               type="button"
               className="action primary"
@@ -155,11 +157,6 @@ export function Dashboard() {
             )}
           </div>
 
-          <div className="card">
-            <h2>Medidores</h2>
-            <MeterTable meters={summary.meters} />
-          </div>
-
           {lastRun && (
             <div className="card">
               <h2>Último análisis</h2>
@@ -177,7 +174,6 @@ export function Dashboard() {
               </dl>
             </div>
           )}
-        </div>
       </div>
     </>
   )

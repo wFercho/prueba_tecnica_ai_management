@@ -1,11 +1,13 @@
 import { useState } from 'react'
 import { Link } from '@tanstack/react-router'
+import { ChevronDown, Search } from 'lucide-react'
 import {
   flexRender, getCoreRowModel, getFilteredRowModel, getSortedRowModel, useReactTable,
   type ColumnDef, type ColumnFiltersState, type SortingState,
 } from '@tanstack/react-table'
 import type { Health, Meter, Severity } from '../api'
 import { HealthBadge, SeverityBadge } from '../components/badges'
+import { SortButton } from '../components/SortButton'
 import { formatNumber, formatPercent } from '../components/format'
 
 const severityRank: Record<string, number> = { HIGH: 0, MEDIUM: 1, LOW: 2 }
@@ -60,17 +62,23 @@ export function MeterTable({ meters }: { meters: Meter[] }) {
     <div className="mb-4 flex flex-wrap items-end gap-3">
       <div className="flex flex-col gap-1">
         <label htmlFor="meter-search">Buscar por identificador</label>
-        <input id="meter-search" className="rounded-md border border-slate-300 p-2" type="search"
-          value={(table.getColumn('meter_id')?.getFilterValue() as string) ?? ''}
-          onChange={(event) => table.getColumn('meter_id')?.setFilterValue(event.target.value)} />
+        <div className="relative">
+          <Search size={16} aria-hidden="true" className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-slate-400" />
+          <input id="meter-search" className="h-10 rounded-md border border-slate-300 py-2 pr-3 pl-9" type="search"
+            value={(table.getColumn('meter_id')?.getFilterValue() as string) ?? ''}
+            onChange={(event) => table.getColumn('meter_id')?.setFilterValue(event.target.value)} />
+        </div>
       </div>
       <div className="flex flex-col gap-1">
         <label htmlFor="meter-health">Filtrar por salud</label>
-        <select id="meter-health" className="rounded-md border border-slate-300 p-2" value={health}
-          onChange={(event) => table.getColumn('health')?.setFilterValue(event.target.value || undefined)}>
-          <option value="">Todos</option><option value="HEALTHY">Normales</option>
-          <option value="ALERT">Alertas</option><option value="CRITICAL">Críticos</option>
-        </select>
+        <div className="relative">
+          <select id="meter-health" className="h-10 appearance-none rounded-md border border-slate-300 py-2 pr-9 pl-3" value={health}
+            onChange={(event) => table.getColumn('health')?.setFilterValue(event.target.value || undefined)}>
+            <option value="">Todos</option><option value="HEALTHY">Normales</option>
+            <option value="ALERT">Alertas</option><option value="CRITICAL">Críticos</option>
+          </select>
+          <ChevronDown size={16} aria-hidden="true" className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-slate-400" />
+        </div>
       </div>
     </div>
     <div className="overflow-x-auto">
@@ -78,11 +86,15 @@ export function MeterTable({ meters }: { meters: Meter[] }) {
         <thead>{table.getHeaderGroups().map((group) => <tr key={group.id}>
           {group.headers.map((header) => <th key={header.id}
             aria-sort={header.column.getIsSorted() === 'asc' ? 'ascending' : header.column.getIsSorted() === 'desc' ? 'descending' : 'none'}>
-            {header.column.getCanSort() ? <button type="button" className="cursor-pointer text-left underline-offset-2 hover:underline"
-              onClick={header.column.getToggleSortingHandler()} aria-label={`Ordenar por ${String(header.column.columnDef.header)}`}>
-              {flexRender(header.column.columnDef.header, header.getContext())}
-              {header.column.getIsSorted() === 'asc' ? ' ↑' : header.column.getIsSorted() === 'desc' ? ' ↓' : ''}
-            </button> : flexRender(header.column.columnDef.header, header.getContext())}
+            {header.column.getCanSort() ? (
+              <SortButton
+                label={String(header.column.columnDef.header)}
+                sorted={header.column.getIsSorted()}
+                onToggle={(event) => header.column.getToggleSortingHandler()?.(event)}
+              />
+            ) : (
+              flexRender(header.column.columnDef.header, header.getContext())
+            )}
           </th>)}
         </tr>)}</thead>
         <tbody>{table.getRowModel().rows.map((row) => <tr key={row.id}>

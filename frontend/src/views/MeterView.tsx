@@ -43,7 +43,7 @@ export function MeterView({ meterId }: { meterId: string }) {
         <Link to="/" className="text-blue-700 underline underline-offset-2">Panel general</Link>
         <span aria-hidden="true"> / </span><span aria-current="page">Medidor {meter.meter_id}</span>
       </nav>
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_22rem] lg:items-start">
       <div className="flex min-w-0 flex-col gap-4">
         <div className="card">
           <h2>Consumo frente a su línea base</h2>
@@ -118,23 +118,6 @@ export function MeterView({ meterId }: { meterId: string }) {
         </div>
 
         <div className="card">
-          <h2>Variables eléctricas</h2>
-          <p className="muted">El estado de origen no sustituye el veredicto de calidad: las lecturas afectadas se identifican aparte.</p>
-          <details>
-            <summary className="cursor-pointer text-blue-700">Ver histórico horario de voltaje, corriente y factor de potencia</summary>
-            <div className="max-h-80 overflow-auto">
-              <table><thead><tr><th>Hora UTC</th><th>Voltaje (V)</th><th>Corriente (A)</th><th>Factor de potencia</th><th>Estado de origen</th><th>Evidencia</th></tr></thead>
-                <tbody>{points.map((point) => <tr key={point.timestamp}>
-                  <td>{formatDateTime(point.timestamp)}</td><td>{point.voltage_v?.toFixed(2)}</td>
-                  <td>{point.current_a?.toFixed(2)}</td><td>{point.power_factor?.toFixed(3)}</td>
-                  <td>{point.ingested_status}</td><td>{point.in_anomaly ? 'Lectura afectada' : 'Sin hallazgo'}</td>
-                </tr>)}</tbody>
-              </table>
-            </div>
-          </details>
-        </div>
-
-        <div className="card">
           <h2>Reportes de contexto</h2>
           {events.length === 0 ? (
             <p className="empty">No hay reportes para este medidor.</p>
@@ -160,7 +143,7 @@ export function MeterView({ meterId }: { meterId: string }) {
             <dl className="facts">
               <dt>Consumo real</dt>
               <dd>{formatKWh(anomalies[0].actual_kwh)}</dd>
-              <dt>Baseline</dt>
+              <dt>Línea base</dt>
               <dd>{formatKWh(anomalies[0].baseline_kwh)}</dd>
               <dt>Desviación</dt>
                <dd>{formatPercent(anomalies[0].deviation_percent)}</dd>
@@ -170,6 +153,21 @@ export function MeterView({ meterId }: { meterId: string }) {
           </div>
         )}
       </div>
+      </div>
+
+      <div className="card mt-4">
+        <h2>Variables eléctricas horarias</h2>
+        <p className="muted">El estado de origen no sustituye el veredicto de calidad: las lecturas afectadas se identifican aparte.</p>
+        <div className="max-h-96 overflow-auto">
+          <table><thead><tr><th>Hora UTC</th><th>Voltaje (V)</th><th>Corriente (A)</th><th>Factor de potencia</th><th>Estado de origen</th><th>Evidencia</th></tr></thead>
+            <tbody>{points.map((point) => <tr key={point.timestamp}>
+              <td>{formatDateTime(point.timestamp)}</td>
+              <td>{point.voltage_v?.toFixed(2)}</td>
+              <td>{point.current_a?.toFixed(2)}</td><td>{point.power_factor?.toFixed(3)}</td>
+              <td>{point.ingested_status}</td><td>{point.in_anomaly ? 'Lectura afectada' : 'Sin hallazgo'}</td>
+            </tr>)}</tbody>
+          </table>
+        </div>
       </div>
     </div>
   )

@@ -11,7 +11,16 @@ import {
 import { formatDateTime, formatKWh, formatNumber, formatPercent } from '../components/format'
 
 const variableLabel: Record<string, string> = {
-  voltage: 'voltaje (V)', current: 'corriente (A)', power_factor: 'factor de potencia', energy_balance: 'balance energético',
+  consumption: 'consumo', voltage: 'voltaje (V)', current: 'corriente (A)',
+  power_factor: 'factor de potencia', energy_balance: 'balance energético',
+}
+
+// legibleVariable renders a detector variable name: Spanish when known,
+// otherwise the identifier with underscores as spaces in mono.
+function legibleVariable(name: string) {
+  const known = variableLabel[name]
+  if (known) return <span>{known}</span>
+  return <span className="mono">{name.replaceAll('_', ' ')}</span>
 }
 
 const eventLabel: Record<string, string> = {
@@ -105,7 +114,7 @@ export function AnomalyView({ anomalyId }: { anomalyId: number }) {
           <dl className="facts">
             <dt>Consumo</dt>
             <dd>{formatKWh(anomaly.actual_kwh)}</dd>
-            <dt>Baseline</dt>
+            <dt>Línea base</dt>
             <dd>{formatKWh(anomaly.baseline_kwh)}</dd>
             <dt>Desviación</dt>
             <dd>{formatPercent(anomaly.deviation_percent)}</dd>
@@ -148,14 +157,14 @@ export function AnomalyView({ anomalyId }: { anomalyId: number }) {
         </div>
 
         <div className="card">
-          <h2>Corroboración</h2>
+          <h2>Variables que corroboran</h2>
           {anomaly.corroborating.length === 0 ? (
             <p className="empty">No se detectaron variables adicionales relacionadas.</p>
           ) : (
             <p style={{ margin: 0 }}>
               {anomaly.corroborating.map((item) => (
                 <span key={item} className="badge low" style={{ marginRight: 6 }}>
-                  {item}
+                  {legibleVariable(item)}
                 </span>
               ))}
             </p>
@@ -200,7 +209,7 @@ export function AnomalyView({ anomalyId }: { anomalyId: number }) {
                 {anomaly.findings.map((finding) => (
                   <tr key={`${finding.timestamp}-${finding.variable}`}>
                     <td className="mono">{formatDateTime(finding.timestamp)}</td>
-                    <td>{variableLabel[finding.variable] ?? finding.variable}: {formatNumber(finding.value, 2)} frente a {formatNumber(finding.expected, 2)} esperados</td>
+                    <td>{variableLabel[finding.variable] ?? finding.variable.replaceAll('_', ' ')}: {formatNumber(finding.value, 2)} frente a {formatNumber(finding.expected, 2)} esperados</td>
                   </tr>
                 ))}
               </tbody>

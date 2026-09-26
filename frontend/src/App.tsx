@@ -15,7 +15,7 @@ export default function App() {
     },
   })
   return (
-    <div className="app mx-auto max-w-6xl px-4 pb-16 pt-7 sm:px-6">
+    <div className="app mx-auto max-w-7xl px-4 pb-16 pt-7 sm:px-6">
       <header className="mb-6 flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 pb-5">
         <div>
           <Link to="/" className="text-xl font-semibold tracking-tight text-slate-900 no-underline">
