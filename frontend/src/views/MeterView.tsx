@@ -12,12 +12,14 @@ import {
 import { DateRangeFilter } from '../components/DateRangeFilter'
 import { rangeBounds } from '../components/dateRange'
 import { PaginationControls } from '../components/PaginationControls'
+import { SortButton } from '../components/SortButton'
 import { formatDateTime, formatKWh, formatPercent } from '../components/format'
 
 export function MeterView({ meterId }: { meterId: string }) {
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
   const [page, setPage] = useState(0)
+  const [hourOrder, setHourOrder] = useState<'asc' | 'desc'>('asc')
   const pageSize = 24
   const detailQuery = useQuery({
     queryKey: ['meter', meterId],
@@ -46,8 +48,13 @@ export function MeterView({ meterId }: { meterId: string }) {
     const at = new Date(point.timestamp).getTime()
     return at >= fromMs && at <= toMs
   })
-  const pages = Math.ceil(tablePoints.length / pageSize)
-  const pageRows = tablePoints.slice(page * pageSize, page * pageSize + pageSize)
+  const sortedPoints = [...tablePoints].sort((a, b) =>
+    hourOrder === 'asc'
+      ? a.timestamp.localeCompare(b.timestamp)
+      : b.timestamp.localeCompare(a.timestamp),
+  )
+  const pages = Math.ceil(sortedPoints.length / pageSize)
+  const pageRows = sortedPoints.slice(page * pageSize, page * pageSize + pageSize)
   function changeRange(setter: (value: string) => void) {
     return (value: string) => {
       setter(value)
@@ -186,7 +193,16 @@ export function MeterView({ meterId }: { meterId: string }) {
           <p className="empty">No hay lecturas en el rango elegido.</p>
         ) : (
         <div className="max-h-96 overflow-auto">
-          <table><thead><tr><th>Hora UTC</th><th>Voltaje (V)</th><th>Corriente (A)</th><th>Factor de potencia</th><th>Estado de origen</th><th>Evidencia</th></tr></thead>
+          <table><thead><tr><th aria-sort={hourOrder === 'asc' ? 'ascending' : 'descending'}>
+            <SortButton
+              label="Hora UTC"
+              sorted={hourOrder}
+              onToggle={() => {
+                setHourOrder((current) => (current === 'asc' ? 'desc' : 'asc'))
+                setPage(0)
+              }}
+            />
+          </th><th>Voltaje (V)</th><th>Corriente (A)</th><th>Factor de potencia</th><th>Estado de origen</th><th>Evidencia</th></tr></thead>
             <tbody>{pageRows.map((point) => <tr key={point.timestamp}>
               <td>{formatDateTime(point.timestamp)}</td>
               <td>{point.voltage_v?.toFixed(2)}</td>

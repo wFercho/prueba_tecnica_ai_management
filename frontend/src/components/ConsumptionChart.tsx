@@ -1,5 +1,7 @@
 import { CartesianGrid, Line, LineChart, ReferenceArea, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { useState } from 'react'
 import { formatDateTime, formatDay, formatKWh, formatPercent } from './format'
+import { SortButton } from './SortButton'
 
 export interface ChartPoint {
   at: number
@@ -30,7 +32,9 @@ export function ConsumptionChart({ points, height = 270, label }: {
   height?: number
   label: string
 }) {
+  const [hourOrder, setHourOrder] = useState<'asc' | 'desc'>('asc')
   if (points.length === 0) return <p className="empty">No hay lecturas en este periodo.</p>
+  const ordered = [...points].sort((a, b) => (hourOrder === 'asc' ? a.at - b.at : b.at - a.at))
   const bands = episodeBands(points)
   const first = points[0]
   const last = points[points.length - 1]
@@ -81,8 +85,14 @@ export function ConsumptionChart({ points, height = 270, label }: {
       <details className="mt-2 text-sm">
         <summary className="cursor-pointer text-blue-700">Consultar lecturas y comparación en tabla</summary>
         <div className="max-h-72 overflow-auto">
-          <table><thead><tr><th>Hora (UTC)</th><th>Real</th><th>Línea base</th><th>Episodio</th></tr></thead>
-            <tbody>{points.map((point) => <tr key={point.at}>
+          <table><thead><tr><th aria-sort={hourOrder === 'asc' ? 'ascending' : 'descending'}>
+            <SortButton
+              label="Hora (UTC)"
+              sorted={hourOrder}
+              onToggle={() => setHourOrder((current) => (current === 'asc' ? 'desc' : 'asc'))}
+            />
+          </th><th>Real</th><th>Línea base</th><th>Episodio</th></tr></thead>
+            <tbody>{ordered.map((point) => <tr key={point.at}>
               <td>{formatDateTime(new Date(point.at).toISOString())}</td>
               <td>{formatKWh(point.value)}</td>
               <td>{point.baseline == null ? 'Sin datos' : formatKWh(point.baseline)}</td>
