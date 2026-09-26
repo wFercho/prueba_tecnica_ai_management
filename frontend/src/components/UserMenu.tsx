@@ -53,7 +53,7 @@ export function UserMenu({
         <ChevronDown size={14} aria-hidden="true" className="shrink-0 text-slate-400" />
       </button>
       {open && (
-        <div role="menu" aria-label="Cuenta" className="absolute right-0 z-10 mt-1 w-64 rounded-md bg-white py-1 shadow-lg">
+        <div role="menu" aria-label="Cuenta" className="absolute right-0 z-10 mt-1 w-64 rounded-lg bg-white py-1 shadow-md">
           <p className="truncate px-4 py-2 text-sm text-slate-500">{email}</p>
           <button
             role="menuitem"
