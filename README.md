@@ -5,7 +5,7 @@ determinista decide el tipo, la severidad y la puntuación de evidencia; un mode
 lenguaje **opcional** puede mejorar después la redacción en español, sin cambiar el
 veredicto ni bloquear la demostración sin API key.
 
-## Demostración en 5–10 minutos
+## Demostración
 
 Necesitas Docker y `make`. No hace falta instalar Go, Node ni PostgreSQL en el host.
 
