@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Activity, Gauge, LayoutList, Play } from 'lucide-react'
 import { api, type Run } from '../api'
 import {
   BandOnly,
@@ -111,25 +112,9 @@ export function Dashboard() {
         <p className="notice error" role="alert">No se pudo completar el análisis. Inténtalo de nuevo.</p>
       )}
 
-      <div className="card">
-        <h2>Hallazgos, por urgencia</h2>
-        {anomalies.length === 0 ? (
-          <p className="empty">
-            {lastSuccessful ? 'No hay anomalías en el último análisis exitoso.' : 'Pendiente de análisis: aún no hay resultados.'}
-          </p>
-        ) : (
-          <AnomalyTable anomalies={anomalies} />
-        )}
-      </div>
-
-      <div className="card">
-        <h2>Medidores</h2>
-        <MeterTable meters={summary.meters} />
-      </div>
-
       <div className="grid items-start gap-4 md:grid-cols-2">
         <div className="card">
-          <h2>Análisis</h2>
+          <h2><Play size={14} aria-hidden="true" /> Análisis</h2>
             <button
               type="button"
               className="action primary"
@@ -159,7 +144,7 @@ export function Dashboard() {
 
           {lastRun && (
             <div className="card">
-              <h2>Último análisis</h2>
+              <h2><Activity size={14} aria-hidden="true" /> Último análisis</h2>
               <dl className="facts">
                 <dt>Estado</dt>
                 <dd><RunStateBadge run={lastRun} /></dd>
@@ -174,6 +159,22 @@ export function Dashboard() {
               </dl>
             </div>
           )}
+      </div>
+
+      <div className="card">
+        <h2><LayoutList size={14} aria-hidden="true" /> Hallazgos, por urgencia</h2>
+        {anomalies.length === 0 ? (
+          <p className="empty">
+            {lastSuccessful ? 'No hay anomalías en el último análisis exitoso.' : 'Pendiente de análisis: aún no hay resultados.'}
+          </p>
+        ) : (
+          <AnomalyTable anomalies={anomalies} />
+        )}
+      </div>
+
+      <div className="card">
+        <h2><Gauge size={14} aria-hidden="true" /> Medidores</h2>
+        <MeterTable meters={summary.meters} />
       </div>
     </>
   )

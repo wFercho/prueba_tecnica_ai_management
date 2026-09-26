@@ -90,8 +90,9 @@ button {
 .card {
   background: var(--card);
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: 12px;
   padding: 18px;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.05);
 }
 
 .card h2 {
@@ -101,6 +102,13 @@ button {
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--ink-faint);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.card h2 svg {
+  flex: none;
 }
 
 .grid {

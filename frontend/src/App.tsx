@@ -1,6 +1,7 @@
 import { Link, Outlet, useLocation } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from './api'
+import { UserMenu } from './components/UserMenu'
 import './App.css'
 
 export default function App() {
@@ -27,11 +28,14 @@ export default function App() {
         </div>
         {location.pathname !== '/login' && (
           <nav aria-label="Navegación principal" className="flex flex-wrap items-center gap-3">
-            <Link to="/" className="rounded-md px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700">
-              Panel general
-            </Link>
-            {session.data && <span className="text-sm text-slate-600">{session.data.user.email}</span>}
-            <button className="action" type="button" disabled={logout.isPending} onClick={() => logout.mutate()}>Cerrar sesión</button>
+            {location.pathname !== '/' && (
+              <Link to="/" className="rounded-md px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700">
+                Panel general
+              </Link>
+            )}
+            {session.data && (
+              <UserMenu email={session.data.user.email} loggingOut={logout.isPending} onLogout={() => logout.mutate()} />
+            )}
           </nav>
         )}
       </header>
