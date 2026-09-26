@@ -31,7 +31,8 @@ COPY backend/ ./
 # CGO off makes the binaries static, so the runtime image does not need libc.
 # -trimpath and -s -w keep the build paths and the symbol table out of the image.
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/api ./cmd/server \
- && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/seed ./cmd/seed
+ && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/seed ./cmd/seed \
+ && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/provision ./cmd/provision
 
 # ---------- tests: the same source, with the toolchain that checks it ----------
 # A separate stage so that running the suite needs no Go on the host and no
@@ -67,6 +68,7 @@ RUN adduser -D -H -u 10001 app
 WORKDIR /app
 COPY --from=backend /out/api /app/api
 COPY --from=backend /out/seed /app/seed
+COPY --from=backend /out/provision /app/provision
 # The server serves the dashboard from here, and the seeder reads the delivered
 # CSVs from /app/data. Both paths are what the configuration defaults to.
 COPY --from=frontend /src/frontend/dist /app/frontend/dist
@@ -76,9 +78,9 @@ USER app
 ENV PORT=8080 LOG_LEVEL=info
 EXPOSE 8080
 
-# A container that is up but not serving is not up. /meters needs no run to exist,
+# A container that is up but not serving is not up. /health needs no session,
 # so it answers as soon as the API is listening.
 HEALTHCHECK --interval=5s --timeout=3s --start-period=3s --retries=5 \
-  CMD wget -qO- "http://127.0.0.1:${PORT}/meters" >/dev/null || exit 1
+  CMD wget -qO- "http://127.0.0.1:${PORT}/health" >/dev/null || exit 1
 
 ENTRYPOINT ["/app/api"]

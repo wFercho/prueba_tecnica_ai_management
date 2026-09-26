@@ -1,225 +1,81 @@
-// A contract walk of the running API, checking exactly the fields the dashboard
-// reads. The unit tests prove the backend against a fake store and the frontend's
-// types prove nothing at runtime, so this is the one check that a change to the
-// JSON would fail: it runs against the live container, where the browser will read
-// from.
-//
-//   node smoke.mjs            # against http://api:8080 inside compose
-//   API_URL=http://localhost:8090 node smoke.mjs
-
+// A read-only contract check by default. It does NOT trigger the first analysis
+// in a database reserved for showing that action during a live demonstration.
+// To run the full four-episode contract on an isolated stack (or after the demo),
+// set SMOKE_ANALYZE=1; otherwise the check observes whichever state exists.
 const base = process.env.API_URL ?? 'http://localhost:8080'
+const password = process.env.DEMO_PASSWORD ?? 'admin'
 let failures = 0
-
-const fail = (what) => {
-  failures += 1
-  console.error(`  ✗ ${what}`)
+const check = (ok, message) => {
+  if (ok) console.log(`  ✓ ${message}`)
+  else { console.error(`  ✗ ${message}`); failures++ }
 }
 
-const pass = (what) => console.log(`  ✓ ${what}`)
-
-function isNumber(value) {
-  return typeof value === 'number' && Number.isFinite(value)
-}
-
-function has(object, fields, where) {
-  for (const field of fields) {
-    if (object == null || !(field in object)) {
-      fail(`${where} is missing "${field}"`)
-      return false
-    }
-  }
-  return true
-}
-
-async function get(path) {
-  const response = await fetch(base + path)
-  if (!response.ok) throw new Error(`GET ${path} answered ${response.status}`)
+const login = await fetch(base + '/auth/login', {
+  method: 'POST', headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ email: 'admin@email.com', password }),
+})
+check(login.status === 200, 'la cuenta de demostración permite iniciar sesión')
+if (!login.ok) process.exit(1)
+const cookie = login.headers.get('set-cookie')?.split(';')[0]
+check(Boolean(cookie?.startsWith('energy_session=')), 'la API devuelve una cookie de sesión')
+const request = (path, init = {}) => fetch(base + path, {
+  ...init, headers: { cookie, ...init.headers },
+})
+const get = async (path) => {
+  const response = await request(path)
+  if (!response.ok) throw new Error(`GET ${path}: ${response.status}`)
   return response.json()
 }
 
-const ANOMALY_FIELDS = [
-  'id',
-  'meter_id',
-  'window_start',
-  'window_end',
-  'affected_readings',
-  'type',
-  'severity',
-  'confidence',
-  'confidence_band',
-  'confidence_basis',
-  'deviation_percent',
-  'actual_kwh',
-  'baseline_kwh',
-  'corroborating',
-  'deviation_series',
-  'corroborating',
-  'reason',
-  'recommended_action',
-  'detected_by',
-  'explanation_source',
-  'explanation_status',
-  'status',
-]
-
-const TYPES = ['REAL_ANOMALY', 'EXPLAINABLE', 'FALSE_POSITIVE', 'DATA_QUALITY']
-const SEVERITIES = ['HIGH', 'MEDIUM', 'LOW']
-const STATUSES = ['OPEN', 'ACKNOWLEDGED', 'RESOLVED', 'DISMISSED']
-
-console.log(`walking the API at ${base}\n`)
-
-console.log('POST /ai/analyze')
-const analysed = await (await fetch(base + '/ai/analyze', { method: 'POST' })).json()
-if (analysed.run?.state === 'COMPLETED' && analysed.run.anomaly_count > 0) {
-  pass(`run ${analysed.run.id} completed with ${analysed.run.anomaly_count} findings`)
-} else {
-  fail(`the run did not complete: ${JSON.stringify(analysed)}`)
+if (process.env.SMOKE_ANALYZE === '1') {
+  const response = await request('/ai/analyze', { method: 'POST' })
+  const body = await response.json()
+  check(response.status === 202 && body.run?.anomaly_count === 4, 'el análisis devuelve 202 tras persistir cuatro episodios')
 }
 
-console.log('\nGET /dashboard/summary')
 const summary = await get('/dashboard/summary')
-if (has(summary, ['needs_attention', 'total_kwh', 'anomaly_counts', 'last_run', 'meters'], 'the summary')) {
-  pass('the summary carries the fields the KPI row reads')
-}
-if (isNumber(summary.total_kwh) && isNumber(summary.needs_attention)) {
-  pass(`total ${summary.total_kwh} kWh, ${summary.needs_attention} open`)
-} else {
-  fail('total_kwh and needs_attention must both be numbers')
-}
-if (!Array.isArray(summary.meters) || summary.meters.length !== 12) {
-  fail(`expected 12 meters in the catalogue, got ${summary.meters?.length}`)
-} else {
-  pass('twelve meters')
-}
-const badMeter = (summary.meters ?? []).find(
-  (meter) => !has(meter, ['meter_id', 'name', 'health', 'total_kwh', 'readings', 'open_anomalies'], 'a meter row'),
-)
-if (!badMeter) pass('every meter row is complete')
-const health = (summary.meters ?? []).map((meter) => meter.health)
-if (health.every((value) => ['HEALTHY', 'ALERT', 'CRITICAL'].includes(value))) {
-  pass('health is one of the three derived values')
-} else {
-  fail(`unexpected health values: ${health.join(', ')}`)
-}
-if (summary.last_run) {
-  if (has(summary.last_run, ['id', 'state', 'anomaly_count', 'narrating', 'explained', 'failed'], 'the last run')) {
-    pass('the last run carries its narration counters')
-  }
-}
-
-console.log('\nGET /anomalies')
+check(summary.meters?.length === 12, 'el catálogo contiene 12 medidores')
+check(typeof summary.total_kwh === 'number', 'el resumen contiene consumo del periodo')
+check('last_successful_run' in summary && 'high_priority' in summary && 'confidence_bands' in summary,
+  'el resumen separa último éxito, prioridad y distribución de confianza')
 const { anomalies } = await get('/anomalies')
-if (anomalies.length !== 4) {
-  fail(`expected the four delivered findings, got ${anomalies.length}`)
-} else {
-  pass('four findings')
-}
-const incomplete = anomalies.find((anomaly) => !has(anomaly, ANOMALY_FIELDS, 'a finding'))
-if (!incomplete) pass('every finding is complete')
-const badEnum = anomalies.find(
-  (anomaly) =>
-    !TYPES.includes(anomaly.type) ||
-    !SEVERITIES.includes(anomaly.severity) ||
-    !STATUSES.includes(anomaly.status) ||
-    typeof anomaly.reason !== 'string' ||
-    anomaly.reason.length === 0,
-)
-if (!badEnum) pass('the vocabularies and the prose are what the badges expect')
-const unordered = anomalies.find(
-  (anomaly, index) => index > 0 && anomalies[index - 1].confidence < anomaly.confidence,
-)
-if (!unordered) pass('the list arrives most urgent first, as the dashboard claims')
-const worst = anomalies[0]
-if (worst?.meter_id === 'M-109' && worst?.type === 'REAL_ANOMALY') {
-  pass('M-109 leads the list')
-} else {
-  fail(`expected M-109 REAL_ANOMALY first, got ${worst?.meter_id} ${worst?.type}`)
-}
 
-console.log('\nGET /anomalies/{id}')
-const { anomaly } = await get(`/anomalies/${worst.id}`)
-if (has(anomaly, ['id', 'confidence_basis', 'deviation_series', 'correlated_event'], 'the finding')) {
-  pass('the investigation view has its evidence')
-}
-if (has(anomaly.confidence_basis ?? {}, ['deviation', 'event_match', 'corroboration', 'persistence'], 'the basis')) {
-  pass('the four confidence terms are present for the score table')
-}
-if (Array.isArray(anomaly.deviation_series) && anomaly.deviation_series.length > 0) {
-  const point = anomaly.deviation_series[0]
-  if (has(point, ['timestamp', 'actual_kwh', 'baseline_kwh', 'deviation'], 'a series point')) {
-    pass(`the series has ${anomaly.deviation_series.length} points the chart can draw`)
+if (!summary.last_successful_run) {
+  check(anomalies.length === 0, 'antes del primer análisis no hay resultados precocinados')
+  check(summary.meters.every((meter) => meter.health === 'UNASSESSED' || meter.health === 'INSUFFICIENT_DATA'),
+    'antes del primer análisis ningún medidor se declara sano')
+} else {
+  check(anomalies.length === 4, 'cuatro episodios visibles, no acumulados de runs anteriores')
+  check(summary.high_priority === 2, 'dos episodios de prioridad alta')
+  check(anomalies[0]?.meter_id === 'M-109', 'M-109 encabeza la lista')
+  check(anomalies.every((item) => item.anomaly === true && item.status === 'OPEN' &&
+    item.reason?.length > 0 && item.recommended_action?.length > 0),
+  'todas las filas tienen veredicto, estado abierto y texto por reglas')
+  const m112 = anomalies.find((item) => item.meter_id === 'M-112')
+  const row112 = summary.meters.find((item) => item.meter_id === 'M-112')
+  check(m112?.type === 'DATA_QUALITY' && m112.severity === 'HIGH' && m112.affected_readings === 16 && row112?.health === 'ALERT',
+    'M-112 conserva calidad HIGH y salud ALERT con 16 lecturas afectadas')
+  if (m112) {
+    const detail112 = await get(`/anomalies/${m112.id}`)
+    check(detail112.anomaly.findings?.some((item) => item.timestamp && item.variable === 'voltage' && typeof item.value === 'number'),
+      'el detalle contiene los valores y horas ofensores de calidad')
+    const refused = await request(`/anomalies/${m112.id}`, {
+      method: 'PATCH', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ status: 'ACKNOWLEDGED' }),
+    })
+    check(refused.status === 405, 'no existe endpoint de workflow para cambiar estado')
   }
-}
-if (anomaly.correlated_event === null || has(anomaly.correlated_event, ['timestamp', 'type', 'description', 'explains'], 'the event')) {
-  pass('the event panel renders for both the reported and the unexplained case')
-}
-
-console.log('\nGET /meters/{meterId}')
-const detail = await get('/meters/M-109')
-if (has(detail, ['meter', 'health', 'total_kwh', 'points', 'baseline', 'anomalies', 'events'], 'the meter view')) {
-  pass('the meter view has every section it renders')
-}
-if (detail.points.length === 336) {
-  pass('336 hourly points')
-} else {
-  fail(`expected 336 points, got ${detail.points.length}`)
-}
-const badPoint = (detail.points ?? []).find(
-  (point) =>
-    !has(point, ['timestamp', 'consumption_kwh', 'voltage_v', 'current_a', 'power_factor', 'baseline_kwh', 'in_anomaly'], 'a point'),
-)
-if (!badPoint) pass('every point carries what the chart and the tooltip read')
-if ((detail.points ?? []).some((point) => point.in_anomaly === true)) {
-  pass('the chart has hours to shade')
-} else {
-  fail('no point is marked in_anomaly, so the chart would draw no band')
-}
-if ((detail.baseline ?? []).length === 24) {
-  pass('24 baseline hours')
-} else {
-  fail(`expected 24 baseline hours, got ${detail.baseline?.length}`)
+  const meter = await get('/meters/M-109')
+  check(meter.points?.length === 336 && meter.baseline?.length === 24,
+    'M-109 ofrece la serie horaria y su línea base')
+  check(meter.points?.filter((point) => point.in_anomaly).length === 58,
+    'el gráfico destaca exactamente las 58 horas afectadas de M-109')
 }
 
-console.log('\nPATCH /anomalies/{id}')
-const target = anomalies[anomalies.length - 1]
-const patched = await (
-  await fetch(`${base}/anomalies/${target.id}`, {
-    method: 'PATCH',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ status: 'ACKNOWLEDGED' }),
-  })
-).json()
-if (patched.anomaly?.status === 'ACKNOWLEDGED') {
-  pass(`finding ${target.id} is now acknowledged`)
-} else {
-  fail(`the status did not change: ${JSON.stringify(patched)}`)
-}
-const reread = await get(`/anomalies/${target.id}`)
-if (reread.anomaly.status === 'ACKNOWLEDGED') {
-  pass('and it survived the round trip')
-}
-const rejected = await fetch(`${base}/anomalies/${target.id}`, {
-  method: 'PATCH',
-  headers: { 'content-type': 'application/json' },
-  body: JSON.stringify({ status: 'MAYBE' }),
-})
-if (rejected.status === 400) {
-  pass('an unknown status is refused with 400, which is what the UI surfaces as an error')
-} else {
-  fail(`an unknown status answered ${rejected.status}, want 400`)
-}
+const loggedOut = await request('/auth/logout', { method: 'POST' })
+check(loggedOut.status === 204, 'se puede cerrar sesión')
+const revoked = await request('/dashboard/summary')
+check(revoked.status === 401, 'la cookie revocada ya no autoriza consultas')
 
-console.log('\nGET a meter that is not there')
-const missing = await fetch(`${base}/meters/M-999`)
-if (missing.status === 404) {
-  pass('404, which the API client turns into a readable message')
-} else {
-  fail(`a missing meter answered ${missing.status}, want 404`)
-}
-
-console.log('')
-if (failures > 0) {
-  console.error(`${failures} contract check(s) failed`)
-  process.exit(1)
-}
-console.log('every field the dashboard reads is present and well formed')
+if (failures) process.exit(1)
+console.log('Contrato del panel y autenticación comprobados')

@@ -4,7 +4,7 @@
 
 **Blocked by:** 04 — Reimportar datos sin resultados precalculados.
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [ ] La petición de análisis responde `202` con el identificador de run después de persistir las cuatro anomalías y sus explicaciones/acciones por reglas **en español**; la tabla se puede consultar inmediatamente y ninguna celda de razón o acción está vacía.
 - [ ] Los tipos/severidades son los cuatro casos del PDF; hay exactamente cuatro episodios para los CSV entregados y ninguno en los ocho medidores de control. M-109 encabeza el orden, M-106 queda `FALSE_POSITIVE/LOW` con «No escalar».

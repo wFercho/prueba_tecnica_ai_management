@@ -49,10 +49,15 @@ db-only: ## Start only the database, for running the API on the host
 seed: ## Import the delivered readings and events (idempotent)
 	$(COMPOSE) run --rm seed
 
-analyze: ## Run the detector over the imported data
+analyze: ## Run the detector over the imported data (uses the demo account)
 	@echo "running the detector..."
-	@$(COMPOSE) exec -T api wget -qO- --post-data='' http://127.0.0.1:8080/ai/analyze \
-		| sed 's/^/  /'
+	@jar=$$(mktemp); \
+	base=http://$$( $(COMPOSE) port api 8080 | sed 's/0\.0\.0\.0/127.0.0.1/' ); \
+	curl -sS -c $$jar -H 'content-type: application/json' \
+		-d "{\"email\":\"admin@email.com\",\"password\":\"$${DEMO_PASSWORD:-admin}\"}" \
+		$$base/auth/login >/dev/null; \
+	curl -sS -b $$jar -X POST $$base/ai/analyze | sed 's/^/  /'; \
+	status=$${PIPESTATUS[0]}; rm -f $$jar; exit $$status
 
 # ---------- checks ----------
 

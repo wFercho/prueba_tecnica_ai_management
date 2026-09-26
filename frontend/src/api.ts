@@ -9,8 +9,8 @@ export type AnomalyType =
   | 'EXPLAINABLE'
   | 'FALSE_POSITIVE'
   | 'DATA_QUALITY'
-export type AnomalyStatus = 'OPEN' | 'ACKNOWLEDGED' | 'RESOLVED' | 'DISMISSED'
-export type Health = 'HEALTHY' | 'ALERT' | 'CRITICAL'
+export type AnomalyStatus = 'OPEN'
+export type Health = 'HEALTHY' | 'ALERT' | 'CRITICAL' | 'UNASSESSED' | 'INSUFFICIENT_DATA'
 export type RunState = 'RUNNING' | 'COMPLETED' | 'FAILED'
 export type ExplanationStatus = 'PENDING' | 'READY' | 'FAILED'
 
@@ -20,8 +20,10 @@ export interface Meter {
   location: string
   health: Health
   total_kwh: number
+  variation_percent: number | null
   readings: number
   open_anomalies: number
+  worst_severity?: Severity
 }
 
 export interface Run {
@@ -54,6 +56,7 @@ export interface Event {
 }
 
 export interface Anomaly {
+  anomaly: boolean
   id: number
   run_id: number
   meter_id: string
@@ -88,9 +91,12 @@ export interface Anomaly {
 }
 
 export interface DataQualityFinding {
-  code: string
-  description: string
-  detail?: string
+  timestamp: string
+  variable: string
+  value: number
+  expected: number
+  sigma: number
+  relative_deviation: number
 }
 
 export interface Point {
@@ -113,7 +119,7 @@ export interface MeterDetail {
   meter: { meter_id: string; name: string; location: string }
   health: Health
   total_kwh: number
-  points: (Point & { consumption_kwh: number; baseline_kwh: number | null; in_anomaly: boolean; anomaly_id: number | null })[]
+  points: (Point & { consumption_kwh: number; baseline_kwh: number; baseline_available: boolean; in_anomaly: boolean; anomaly_id?: number; ingested_status: string })[]
   baseline: BaselineHour[]
   anomalies: Anomaly[]
   events: Event[]
@@ -124,6 +130,10 @@ export interface Summary {
   total_kwh: number
   anomaly_counts: Record<string, number>
   last_run: Run | null
+  last_successful_run: Run | null
+  high_priority: number
+  confidence_bands: Record<ConfidenceBand, number>
+  priority_confidence?: ConfidenceBand
   meters: Meter[]
 }
 
@@ -140,6 +150,7 @@ export class ApiError extends Error {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     ...init,
+    credentials: 'same-origin',
     headers: { 'content-type': 'application/json', ...init?.headers },
   })
   if (!response.ok) {
@@ -148,21 +159,26 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const body = (await response.json().catch(() => null)) as
       | { error?: { message?: string } }
       | null
-    throw new ApiError(response.status, body?.error?.message ?? `the API answered ${response.status}`)
+    throw new ApiError(response.status, body?.error?.message ?? `La API respondió con estado ${response.status}`)
   }
   return (await response.json()) as T
 }
 
 export const api = {
+  session: () => request<{ user: { email: string } }>('/auth/session'),
+  login: (email: string, password: string) =>
+    request<{ user: { email: string } }>('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    }),
+  logout: async () => {
+    const response = await fetch('/auth/logout', { method: 'POST', credentials: 'same-origin' })
+    if (!response.ok) throw new ApiError(response.status, 'No se pudo cerrar la sesión.')
+  },
   summary: () => request<Summary>('/dashboard/summary'),
   anomalies: () => request<{ anomalies: Anomaly[] }>('/anomalies'),
   anomaly: (id: number) => request<{ anomaly: Anomaly }>(`/anomalies/${id}`),
   meter: (meterId: string) => request<MeterDetail>(`/meters/${encodeURIComponent(meterId)}`),
-  setStatus: (id: number, status: AnomalyStatus) =>
-    request<{ anomaly: Anomaly }>(`/anomalies/${id}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ status }),
-    }),
   analyze: () => request<{ run: Run }>('/ai/analyze', { method: 'POST' }),
   analysis: (runId: number) => request<{ run: Run }>(`/ai/analysis/${runId}`),
 }

@@ -4,7 +4,7 @@
 
 **Blocked by:** 01 — Ficha de medidor enlazable y base visual en español.
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [ ] El primer arranque provisiona la cuenta demo solo si no existe, guarda un hash de la contraseña y permite provisionar otras cuentas administrativamente sin CRUD de usuarios en la interfaz.
 - [ ] Login válido crea una sesión revocable y una cookie opaca HttpOnly; credenciales inválidas no crean sesión y muestran un error español sin filtrar datos sensibles.

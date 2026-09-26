@@ -47,8 +47,8 @@ func (s *scriptedNarrator) Narrate(ctx context.Context, _ narrate.Evidence) (nar
 		return narrate.Narrative{}, s.err
 	}
 	return narrate.Narrative{
-		Reason: "The load rose at 14:00 and stayed at twice its usual level for the rest of the window.",
-		Action: "Ask operations whether a load change was intended.",
+		Reason: "El consumo aumentó a las 14:00 y se mantuvo por encima de su línea base durante el episodio.",
+		Action: "Consultar con operaciones si el cambio de carga estaba previsto.",
 		Source: catalog.SourceLLM,
 	}, nil
 }
@@ -98,7 +98,9 @@ func newService(t *testing.T, narrator narrate.Narrator) (*Service, *memory.Stor
 func TestAnalyzePersistsEveryAnomalyWithProseBeforeReturning(t *testing.T) {
 	// ADR-0006: the deterministic explanation is written first, always. If this
 	// ever fails, an anomaly can reach the dashboard with nothing to show.
-	service, fake := newService(t, &scriptedNarrator{})
+	gate := make(chan struct{})
+	service, fake := newService(t, &scriptedNarrator{gate: gate})
+	t.Cleanup(func() { close(gate); service.WaitForNarration() })
 
 	run, err := service.Analyze(context.Background())
 	if err != nil {
@@ -143,6 +145,28 @@ func TestRunCountsWhatItFound(t *testing.T) {
 	}
 	if run.WindowStart.IsZero() || run.WindowEnd.IsZero() {
 		t.Error("the run does not record the window it analysed")
+	}
+}
+
+func TestRulesOnlyRunHasReadySpanishProseBeforeTheResponse(t *testing.T) {
+	svc, data := newService(t, nil)
+	run, err := svc.Analyze(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	progress, err := svc.Run(t.Context(), run.ID)
+	if err != nil || progress.Narrating != 0 || progress.Explained != run.AnomalyCount {
+		t.Fatalf("rules progress = %+v, %v", progress, err)
+	}
+	findings, err := data.Anomalies(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findings {
+		if finding.ExplanationSource != catalog.SourceRules || finding.ExplanationStatus != catalog.ExplanationReady ||
+			!strings.Contains(finding.Reason, "línea base") || finding.RecommendedAction == "" {
+			t.Errorf("rules prose not ready and Spanish at response time: %+v", finding)
+		}
 	}
 }
 
@@ -191,7 +215,7 @@ func TestNarrationUpgradesEachAnomalyOnceItAnswers(t *testing.T) {
 		if anomaly.ExplanationStatus != catalog.ExplanationReady {
 			t.Errorf("anomaly %d status = %q, want READY", anomaly.ID, anomaly.ExplanationStatus)
 		}
-		if !strings.Contains(anomaly.Reason, "twice its usual level") {
+		if !strings.Contains(anomaly.Reason, "se mantuvo por encima de su línea base") {
 			t.Errorf("anomaly %d kept the template: %q", anomaly.ID, anomaly.Reason)
 		}
 	}
@@ -411,18 +435,5 @@ func TestMeterDetailForAnUnknownMeterIsNotFound(t *testing.T) {
 
 	if _, err := service.MeterDetail(context.Background(), "M-NOPE"); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("err = %v, want ErrNotFound", err)
-	}
-}
-
-func TestSettingAnInvalidStatusIsRefused(t *testing.T) {
-	service, fake := newService(t, &scriptedNarrator{})
-	if _, err := service.Analyze(context.Background()); err != nil {
-		t.Fatalf("Analyze: %v", err)
-	}
-	stored, _ := fake.Anomalies(context.Background())
-
-	err := service.SetAnomalyStatus(context.Background(), stored[0].ID, catalog.AnomalyStatus("MAYBE"))
-	if err == nil {
-		t.Fatal("got no error, want an unknown status refused rather than stored")
 	}
 }

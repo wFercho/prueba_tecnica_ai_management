@@ -37,6 +37,9 @@ func TestDefaultsMakeTheStackRunWithNoEnvironmentAtAll(t *testing.T) {
 	if cfg.NarrationEnabled() {
 		t.Error("narration is enabled without an API key")
 	}
+	if cfg.DemoPassword != "admin" {
+		t.Errorf("demo password = %q, want the documented default", cfg.DemoPassword)
+	}
 }
 
 func TestTheEnvironmentOverridesTheDefaults(t *testing.T) {
@@ -48,10 +51,15 @@ func TestTheEnvironmentOverridesTheDefaults(t *testing.T) {
 		"STATIC_DIR":     "/srv/dashboard",
 		"OPENAI_API_KEY": "sk-test",
 		"OPENAI_MODEL":   "gpt-4o-mini",
+		"DEMO_PASSWORD":  "cambiada",
 		"LOG_LEVEL":      "debug",
 	})
 	if err != nil {
 		t.Fatalf("Load: %v", err)
+	}
+
+	if cfg.DemoPassword != "cambiada" {
+		t.Errorf("demo password = %q, want the configured value", cfg.DemoPassword)
 	}
 
 	if cfg.DatabaseURL != "postgres://someone@elsewhere:5433/other" {

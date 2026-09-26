@@ -14,7 +14,6 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
-	"sort"
 	"sync"
 	"time"
 
@@ -78,6 +77,12 @@ func (s *Service) Analyze(ctx context.Context) (store.Run, error) {
 	if err != nil {
 		return s.abandon(ctx, runID, err)
 	}
+	_, rulesOnly := s.narrator.(narrate.Rules)
+	if rulesOnly {
+		for i := range anomalies {
+			anomalies[i].ExplanationStatus = catalog.ExplanationReady
+		}
+	}
 
 	// The rules explanation is written here, before the caller is told the run
 	// exists. Everything after this point is an improvement, never a prerequisite.
@@ -95,7 +100,9 @@ func (s *Service) Analyze(ctx context.Context) (store.Run, error) {
 
 	// Narration outlives the request that triggered it. A client that closed the
 	// connection mid-run must not silently cancel the explanations it asked for.
-	s.startNarration(runID)
+	if !rulesOnly {
+		s.startNarration(runID)
+	}
 	return run, nil
 }
 
@@ -133,7 +140,7 @@ func (s *Service) startNarration(runID int64) {
 }
 
 func (s *Service) narrateRun(ctx context.Context, runID int64) {
-	anomalies, err := s.store.Anomalies(ctx)
+	anomalies, err := s.store.RunAnomalies(ctx, runID)
 	if err != nil {
 		s.log.Warn("could not read the anomalies to narrate", "run", runID, "error", err)
 		return
@@ -171,6 +178,10 @@ func (s *Service) narrateOne(ctx context.Context, anomaly analysis.Anomaly) {
 		// Anything other than the template is the model's prose, so an unlabelled
 		// narrator is credited as the model rather than silently filed as rules.
 		source = catalog.SourceLLM
+	}
+	if source != catalog.SourceRules && (!narrate.IsSpanishProse(narrative.Reason) || !narrate.IsSpanishProse(narrative.Action)) {
+		s.markFailed(ctx, anomaly.ID, errors.New("narration is not in Spanish"))
+		return
 	}
 	if err := s.store.Narrate(ctx, anomaly.ID, source, narrative.Reason, narrative.Action); err != nil {
 		s.log.Error("could not store the narration", "anomaly", anomaly.ID, "error", err)
@@ -227,27 +238,15 @@ func (s *Service) Anomaly(ctx context.Context, id int64) (AnomalyView, error) {
 	if err != nil {
 		return AnomalyView{}, err
 	}
+	current, err := s.store.LatestCompletedRun(ctx)
+	if err != nil || anomaly.RunID != current.ID {
+		return AnomalyView{}, store.ErrNotFound
+	}
 	meter, err := s.store.Meter(ctx, anomaly.MeterCode)
 	if err != nil {
 		return AnomalyView{}, err
 	}
 	return AnomalyView{Anomaly: anomaly, MeterName: meter.Name, MeterLocation: meter.Location}, nil
-}
-
-// ErrInvalidRequest marks a request the caller got wrong, as opposed to one the
-// system failed to answer. The API turns it into a 400 and anything else into a
-// 500, so a mistyped status is never reported as a broken server.
-var ErrInvalidRequest = errors.New("invalid request")
-
-// SetAnomalyStatus records the operator's decision about a finding.
-func (s *Service) SetAnomalyStatus(ctx context.Context, id int64, status catalog.AnomalyStatus) error {
-	switch status {
-	case catalog.StatusOpen, catalog.StatusAcknowledged, catalog.StatusResolved, catalog.StatusDismissed:
-	default:
-		return fmt.Errorf("%w: status %q is not one of OPEN, ACKNOWLEDGED, RESOLVED or DISMISSED",
-			ErrInvalidRequest, status)
-	}
-	return s.store.SetStatus(ctx, id, status)
 }
 
 // Run returns one run's state and progress: the run itself, and how many of its
@@ -257,16 +256,14 @@ func (s *Service) Run(ctx context.Context, id int64) (RunProgress, error) {
 	if err != nil {
 		return RunProgress{}, err
 	}
-	anomalies, err := s.store.Anomalies(ctx)
+	anomalies, err := s.store.RunAnomalies(ctx, id)
 	if err != nil {
 		return RunProgress{}, err
 	}
 	return progressOf(run, anomalies), nil
 }
 
-// progressOf derives the progress counts from the anomalies of the run being asked
-// about. The store only ever hands out the latest run's anomalies, so a poll of an
-// older run reports no progress rather than another run's.
+// progressOf derives the progress counts from the requested run's own findings.
 func progressOf(run store.Run, anomalies []analysis.Anomaly) RunProgress {
 	progress := RunProgress{
 		ID:           run.ID,
@@ -297,9 +294,11 @@ func progressOf(run store.Run, anomalies []analysis.Anomaly) RunProgress {
 type Health string
 
 const (
-	HealthHealthy  Health = "HEALTHY"
-	HealthAlert    Health = "ALERT"
-	HealthCritical Health = "CRITICAL"
+	HealthHealthy      Health = "HEALTHY"
+	HealthAlert        Health = "ALERT"
+	HealthCritical     Health = "CRITICAL"
+	HealthUnassessed   Health = "UNASSESSED"
+	HealthInsufficient Health = "INSUFFICIENT_DATA"
 )
 
 // MeterView is a meter's row on the dashboard: its identity, its totals, and what
@@ -311,8 +310,9 @@ type MeterView struct {
 	Health   Health `json:"health"`
 	// TotalKWh is consumption over the analysed window. The dashboard leads with
 	// it, and it is a sum of what was read, not a projection.
-	TotalKWh float64 `json:"total_kwh"`
-	Readings int     `json:"readings"`
+	TotalKWh         float64  `json:"total_kwh"`
+	VariationPercent *float64 `json:"variation_percent"`
+	Readings         int      `json:"readings"`
 	// OpenAnomalies counts findings still to be dealt with, which is what makes
 	// health actionable rather than a label.
 	OpenAnomalies int `json:"open_anomalies"`
@@ -350,16 +350,20 @@ type RunProgress struct {
 
 // Dashboard is everything the landing page shows.
 type Dashboard struct {
-	LastRun *RunProgress `json:"last_run"`
-	Meters  []MeterView  `json:"meters"`
+	LastRun           *RunProgress `json:"last_run"`
+	LastSuccessfulRun *RunProgress `json:"last_successful_run"`
+	Meters            []MeterView  `json:"meters"`
 	// AnomalyCounts is how many findings of each type the last run produced,
 	// including the false positive. It is the count of what was examined, which is
 	// not the count of what needs attention (ADR-0002).
 	AnomalyCounts map[analysis.AnomalyType]int `json:"anomaly_counts"`
 	// NeedsAttention is how many findings are HIGH or MEDIUM and still open. It
 	// is what the dashboard leads with, and it is deliberately not the total.
-	NeedsAttention int     `json:"needs_attention"`
-	TotalKWh       float64 `json:"total_kwh"`
+	NeedsAttention     int                             `json:"needs_attention"`
+	HighPriority       int                             `json:"high_priority"`
+	ConfidenceBands    map[analysis.ConfidenceBand]int `json:"confidence_bands"`
+	PriorityConfidence analysis.ConfidenceBand         `json:"priority_confidence,omitempty"`
+	TotalKWh           float64                         `json:"total_kwh"`
 }
 
 // Dashboard assembles the landing page from stored state.
@@ -387,16 +391,32 @@ func (s *Service) Dashboard(ctx context.Context) (Dashboard, error) {
 
 	counts := map[analysis.AnomalyType]int{}
 	openByMeter := map[string]int{}
-	worstByMeter := map[string]analysis.Severity{}
+	worstByMeter := map[string]analysis.Anomaly{}
+	hasRealHigh := map[string]bool{}
+	hasAlert := map[string]bool{}
 	needsAttention := 0
+	highPriority := 0
+	bands := map[analysis.ConfidenceBand]int{}
 	for _, anomaly := range anomalies {
 		counts[anomaly.Type]++
-		if anomaly.Status != catalog.StatusOpen && anomaly.Status != catalog.StatusAcknowledged {
+		bands[anomaly.ConfidenceBand]++
+		if anomaly.Status != catalog.StatusOpen {
 			continue
 		}
 		openByMeter[anomaly.MeterCode]++
-		if severityRank(anomaly.Severity) < severityRank(worstByMeter[anomaly.MeterCode]) {
-			worstByMeter[anomaly.MeterCode] = anomaly.Severity
+		current := worstByMeter[anomaly.MeterCode]
+		if severityRank(anomaly.Severity) < severityRank(current.Severity) ||
+			(severityRank(anomaly.Severity) == severityRank(current.Severity) &&
+				typeRank(anomaly.Type) < typeRank(current.Type)) {
+			worstByMeter[anomaly.MeterCode] = anomaly
+		}
+		if anomaly.Type == analysis.AnomalyReal && anomaly.Severity == analysis.SeverityHigh {
+			hasRealHigh[anomaly.MeterCode] = true
+		} else if anomaly.Severity == analysis.SeverityHigh || anomaly.Severity == analysis.SeverityMedium {
+			hasAlert[anomaly.MeterCode] = true
+		}
+		if anomaly.Severity == analysis.SeverityHigh {
+			highPriority++
 		}
 		if anomaly.Severity != analysis.SeverityLow {
 			needsAttention++
@@ -404,53 +424,96 @@ func (s *Service) Dashboard(ctx context.Context) (Dashboard, error) {
 	}
 
 	readingsByMeter := map[string]int{}
+	seriesByMeter := map[string][]catalog.Reading{}
 	for _, reading := range readings {
 		readingsByMeter[string(reading.MeterCode)]++
+		seriesByMeter[string(reading.MeterCode)] = append(seriesByMeter[string(reading.MeterCode)], reading)
+	}
+	completed, completedErr := s.store.LatestCompletedRun(ctx)
+	if completedErr != nil && !errors.Is(completedErr, store.ErrNotFound) {
+		return Dashboard{}, completedErr
 	}
 
 	view := Dashboard{
-		AnomalyCounts:  counts,
-		Meters:         make([]MeterView, 0, len(meters)),
-		NeedsAttention: needsAttention,
+		AnomalyCounts:   counts,
+		Meters:          make([]MeterView, 0, len(meters)),
+		NeedsAttention:  needsAttention,
+		HighPriority:    highPriority,
+		ConfidenceBands: bands,
+	}
+	if len(anomalies) > 0 {
+		view.PriorityConfidence = anomalies[0].ConfidenceBand
+	}
+	affectedByMeter := map[string]map[time.Time]bool{}
+	for _, anomaly := range anomalies {
+		if affectedByMeter[anomaly.MeterCode] == nil {
+			affectedByMeter[anomaly.MeterCode] = map[time.Time]bool{}
+		}
+		for _, point := range anomaly.DeviationSeries {
+			affectedByMeter[anomaly.MeterCode][point.Timestamp] = true
+		}
 	}
 	for _, meter := range meters {
 		worst := worstByMeter[string(meter.Code)]
+		meterHealth := healthFor(hasRealHigh[string(meter.Code)], hasAlert[string(meter.Code)])
+		if completedErr != nil {
+			meterHealth = HealthUnassessed
+		} else if readingsByMeter[string(meter.Code)] < 24*s.cfg.MinProfileHistory {
+			meterHealth = HealthInsufficient
+		}
 		row := MeterView{
 			MeterID:       string(meter.Code),
 			Name:          meter.Name,
 			Location:      meter.Location,
-			Health:        health(worst),
+			Health:        meterHealth,
 			TotalKWh:      round(totals[string(meter.Code)], 2),
 			Readings:      readingsByMeter[string(meter.Code)],
 			OpenAnomalies: openByMeter[string(meter.Code)],
-			WorstSeverity: worst,
+			WorstSeverity: worst.Severity,
+		}
+		if len(seriesByMeter[row.MeterID]) > 0 {
+			clean := make([]catalog.Reading, 0, len(seriesByMeter[row.MeterID]))
+			for _, reading := range seriesByMeter[row.MeterID] {
+				if !affectedByMeter[row.MeterID][reading.Timestamp] {
+					clean = append(clean, reading)
+				}
+			}
+			profile := analysis.BuildHourlyProfile(clean, s.cfg)
+			if completedErr == nil && len(profile.Hours()) < 24 {
+				row.Health = HealthInsufficient
+			}
+			baselineTotal := 0.0
+			complete := true
+			for _, reading := range seriesByMeter[row.MeterID] {
+				point, available := profile.Point(reading.Timestamp.Hour())
+				if !available {
+					complete = false
+					break
+				}
+				baselineTotal += point.Expected
+			}
+			if complete && baselineTotal > 0 {
+				variation := round((row.TotalKWh-baselineTotal)/baselineTotal*100, 1)
+				row.VariationPercent = &variation
+			}
 		}
 		view.Meters = append(view.Meters, row)
 		view.TotalKWh = round(view.TotalKWh+row.TotalKWh, 2)
 	}
 
+	if completedErr == nil {
+		last := progressOf(completed, anomalies)
+		view.LastSuccessfulRun = &last
+	}
 	run, err := s.store.LatestRun(ctx)
 	switch {
 	case err == nil:
-		last := &RunProgress{
-			ID:           run.ID,
-			State:        run.State,
-			StartedAt:    run.StartedAt,
-			FinishedAt:   run.FinishedAt,
-			AnomalyCount: run.AnomalyCount,
-			WindowStart:  run.WindowStart,
-			WindowEnd:    run.WindowEnd,
-			Error:        run.Error,
+		progress, err := s.store.RunAnomalies(ctx, run.ID)
+		if err != nil {
+			return Dashboard{}, err
 		}
-		for _, anomaly := range anomalies {
-			switch anomaly.ExplanationStatus {
-			case catalog.ExplanationPending:
-				last.Narrating++
-			case catalog.ExplanationReady:
-				last.Explained++
-			}
-		}
-		view.LastRun = last
+		last := progressOf(run, progress)
+		view.LastRun = &last
 	case errors.Is(err, store.ErrNotFound):
 		// No run yet is a state the dashboard can show, not an error: the catalogue
 		// is still worth listing before anything has been analysed.
@@ -458,6 +521,20 @@ func (s *Service) Dashboard(ctx context.Context) (Dashboard, error) {
 		return Dashboard{}, err
 	}
 	return view, nil
+}
+
+// healthFor derives a meter's standing from its open findings: a high-severity
+// real anomaly is critical, any other high or medium finding is an alert, and
+// anything else is healthy. Health is recomputed on read and never persisted.
+func healthFor(hasRealHigh, hasAlert bool) Health {
+	switch {
+	case hasRealHigh:
+		return HealthCritical
+	case hasAlert:
+		return HealthAlert
+	default:
+		return HealthHealthy
+	}
 }
 
 func health(worst analysis.Severity) Health {
@@ -468,6 +545,24 @@ func health(worst analysis.Severity) Health {
 		return HealthAlert
 	default:
 		return HealthHealthy
+	}
+}
+
+// typeRank orders anomaly types for display when severities tie: a real
+// consumption finding outranks a quality finding at the same severity, so a
+// meter with both reads as the consumption problem it is.
+func typeRank(kind analysis.AnomalyType) int {
+	switch kind {
+	case analysis.AnomalyReal:
+		return 0
+	case analysis.AnomalyDataQuality:
+		return 1
+	case analysis.AnomalyExplainable:
+		return 2
+	case analysis.AnomalyFalsePositive:
+		return 3
+	default:
+		return 4
 	}
 }
 
@@ -488,11 +583,13 @@ func severityRank(severity analysis.Severity) int {
 
 // MeterPoint is one hour of a meter's history.
 type MeterPoint struct {
-	Timestamp   time.Time `json:"timestamp"`
-	Consumption float64   `json:"consumption_kwh"`
-	VoltageV    float64   `json:"voltage_v"`
-	CurrentA    float64   `json:"current_a"`
-	PowerFactor float64   `json:"power_factor"`
+	Timestamp         time.Time `json:"timestamp"`
+	Consumption       float64   `json:"consumption_kwh"`
+	VoltageV          float64   `json:"voltage_v"`
+	CurrentA          float64   `json:"current_a"`
+	PowerFactor       float64   `json:"power_factor"`
+	IngestedStatus    string    `json:"ingested_status"`
+	BaselineAvailable bool      `json:"baseline_available"`
 	// BaselineKWh is what this hour of the day normally consumes. Zero means the
 	// meter has no history for that hour yet, which the chart shows as unknown
 	// rather than as a fall to zero.
@@ -554,22 +651,23 @@ func (s *Service) meterSeries(ctx context.Context, meterID string) (meterSeries,
 	}
 
 	mine := make([]analysis.Anomaly, 0, len(anomalies))
-	windows := make([]readingWindow, 0, len(anomalies))
+	affected := make(map[time.Time]int64)
 	for _, anomaly := range anomalies {
 		if anomaly.MeterCode != meterID {
 			continue
 		}
 		mine = append(mine, anomaly)
-		windows = append(windows, readingWindow{from: anomaly.WindowStart, to: anomaly.WindowEnd, id: anomaly.ID})
+		for _, point := range anomaly.DeviationSeries {
+			affected[point.Timestamp] = anomaly.ID
+		}
 	}
-	sort.Slice(windows, func(i, j int) bool { return windows[i].from.Before(windows[j].from) })
 
 	// The profile learns from the clean history only, so a sustained change cannot
 	// end up explaining itself away. This is the same construction the detector used,
 	// which is why the line under the readings is the line they were judged against.
 	clean := make([]catalog.Reading, 0, len(all))
 	for _, reading := range all {
-		if !inAnyWindow(reading.Timestamp, windows) {
+		if _, detected := affected[reading.Timestamp]; !detected {
 			clean = append(clean, reading)
 		}
 	}
@@ -591,15 +689,17 @@ func (s *Service) meterSeries(ctx context.Context, meterID string) (meterSeries,
 	total := 0.0
 	for _, reading := range all {
 		point := MeterPoint{
-			Timestamp:   reading.Timestamp,
-			Consumption: round(reading.ConsumptionKWh, 3),
-			VoltageV:    round(reading.VoltageV, 2),
-			CurrentA:    round(reading.CurrentA, 2),
-			PowerFactor: round(reading.PowerFactor, 3),
-			BaselineKWh: round(expectedAt[reading.Timestamp.Hour()], 3),
+			Timestamp:      reading.Timestamp,
+			Consumption:    round(reading.ConsumptionKWh, 3),
+			VoltageV:       round(reading.VoltageV, 2),
+			CurrentA:       round(reading.CurrentA, 2),
+			PowerFactor:    round(reading.PowerFactor, 3),
+			BaselineKWh:    round(expectedAt[reading.Timestamp.Hour()], 3),
+			IngestedStatus: reading.IngestedStatus,
 		}
-		if window, ok := windowAt(reading.Timestamp, windows); ok {
-			point.InAnomaly, point.AnomalyID = true, window.id
+		_, point.BaselineAvailable = expectedAt[reading.Timestamp.Hour()]
+		if anomalyID, ok := affected[reading.Timestamp]; ok {
+			point.InAnomaly, point.AnomalyID = true, anomalyID
 		}
 		points = append(points, point)
 		total += reading.ConsumptionKWh
@@ -642,13 +742,29 @@ func (s *Service) MeterDetail(ctx context.Context, meterID string) (MeterDetail,
 		return MeterDetail{}, err
 	}
 
-	worst := analysis.Severity("")
+	worst := analysis.Anomaly{}
+	hasRealHigh := false
+	hasAlert := false
 	for _, anomaly := range series.anomalies {
-		if anomaly.Status == catalog.StatusOpen || anomaly.Status == catalog.StatusAcknowledged {
-			if severityRank(anomaly.Severity) < severityRank(worst) {
-				worst = anomaly.Severity
-			}
+		current := worst
+		if severityRank(anomaly.Severity) < severityRank(current.Severity) ||
+			(severityRank(anomaly.Severity) == severityRank(current.Severity) &&
+				typeRank(anomaly.Type) < typeRank(current.Type)) {
+			worst = anomaly
 		}
+		if anomaly.Type == analysis.AnomalyReal && anomaly.Severity == analysis.SeverityHigh {
+			hasRealHigh = true
+		} else if anomaly.Severity == analysis.SeverityHigh || anomaly.Severity == analysis.SeverityMedium {
+			hasAlert = true
+		}
+	}
+	meterHealth := healthFor(hasRealHigh, hasAlert)
+	if _, err := s.store.LatestCompletedRun(ctx); errors.Is(err, store.ErrNotFound) {
+		meterHealth = HealthUnassessed
+	} else if err != nil {
+		return MeterDetail{}, err
+	} else if len(series.points) < 24*s.cfg.MinProfileHistory {
+		meterHealth = HealthInsufficient
 	}
 
 	meterEvents := make([]catalog.OperationalEvent, 0, len(events))
@@ -660,36 +776,13 @@ func (s *Service) MeterDetail(ctx context.Context, meterID string) (MeterDetail,
 
 	return MeterDetail{
 		Meter:     series.meter,
-		Health:    health(worst),
+		Health:    meterHealth,
 		TotalKWh:  series.total,
 		Points:    series.points,
 		Baseline:  series.baseline,
 		Anomalies: series.anomalies,
 		Events:    meterEvents,
 	}, nil
-}
-
-type readingWindow struct {
-	from time.Time
-	to   time.Time
-	id   int64
-}
-
-func inAnyWindow(at time.Time, windows []readingWindow) bool {
-	_, ok := windowAt(at, windows)
-	return ok
-}
-
-// windowAt finds the first window containing at. The windows are sorted, and the
-// detector does not produce overlapping ones; if two ever did overlap, the earlier
-// window claims the reading rather than the shading flickering between runs.
-func windowAt(at time.Time, windows []readingWindow) (readingWindow, bool) {
-	for _, window := range windows {
-		if !at.Before(window.from) && !at.After(window.to) {
-			return window, true
-		}
-	}
-	return readingWindow{}, false
 }
 
 func round(v float64, places int) float64 {

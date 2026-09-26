@@ -4,7 +4,7 @@
 
 **Blocked by:** 05 — Ejecutar análisis y ver cuatro episodios inmediatamente.
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [ ] El veredicto de calidad se fundamenta en robust bounds y consistencia eléctrica; retirar el reporte etiquetado `DATA_QUALITY` no elimina la detección cuando las lecturas físicas siguen siendo ofensivas.
 - [ ] Los 16 valores defectuosos, recurrentes cada tres horas dentro de lecturas **horarias**, forman un episodio con contador de 16; lecturas normales intercaladas no se cuentan como afectadas.

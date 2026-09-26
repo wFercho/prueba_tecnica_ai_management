@@ -57,10 +57,11 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      DEMO_PASSWORD: ${DEMO_PASSWORD:-admin}
     ports:
       - "${BIND_HOST:-127.0.0.1}:${API_PORT:-8090}:8080"
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/meters"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -83,6 +84,22 @@ services:
     environment:
       DATABASE_URL: postgres://energy:${DB_PASSWORD:-energy}@db:5432/energy?sslmode=disable
       LOG_LEVEL: ${LOG_LEVEL:-info}
+    restart: "no"
+
+  # One-shot administrative account provisioning. Credentials are passed at run
+  # time with `-e`, never stored in the compose file or in the image.
+  provision:
+    profiles: ["provision"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    entrypoint: ["/app/provision"]
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://energy:${DB_PASSWORD:-energy}@db:5432/energy?sslmode=disable
     restart: "no"
 
   # The test suite, run in the same Go toolchain the image is built with, against a
@@ -132,6 +149,8 @@ services:
         condition: service_healthy
     environment:
       API_URL: http://api:8080
+      DEMO_PASSWORD: ${DEMO_PASSWORD:-admin}
+      SMOKE_ANALYZE: ${SMOKE_ANALYZE:-0}
     command: ["node", "smoke.mjs"]
     restart: "no"
 

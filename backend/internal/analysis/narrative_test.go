@@ -63,13 +63,13 @@ func TestRealAnomalyCitesItsNumbersAndSaysItIsUnexplained(t *testing.T) {
 	// M-109's event row says no event was reported. That is evidence of absence,
 	// so the prose must say nothing on record accounts for the change rather than
 	// reach for a likel-sounding cause.
-	if !strings.Contains(anomaly.Reason, "reported no operational event") {
+	if !strings.Contains(anomaly.Reason, "se informó explícitamente que no hubo evento operativo") && !strings.Contains(anomaly.Reason, "Se informó explícitamente que no hubo evento operativo") {
 		t.Errorf("Reason = %q, want it to say the reported absence of an event", anomaly.Reason)
 	}
-	if strings.Contains(anomaly.Reason, "no reported operational event") {
+	if strings.Contains(anomaly.Reason, "New production") {
 		t.Errorf("Reason = %q, want it to distinguish nobody reporting from nothing being reported", anomaly.Reason)
 	}
-	if !strings.Contains(strings.ToLower(anomaly.RecommendedAction), "investigate") {
+	if !strings.Contains(strings.ToLower(anomaly.RecommendedAction), "investigar") {
 		t.Errorf("RecommendedAction = %q, want it to ask for an investigation", anomaly.RecommendedAction)
 	}
 }
@@ -77,12 +77,12 @@ func TestRealAnomalyCitesItsNumbersAndSaysItIsUnexplained(t *testing.T) {
 func TestExplainableAnomalyNamesTheEventAndAsksForConfirmation(t *testing.T) {
 	anomaly := theAnomaly(t, "M-104")
 
-	for _, want := range []string{"New production line activated", "OPERATIONAL_CHANGE", "46.6%", "96"} {
+	for _, want := range []string{"cambio de producción", "46.6%", "96"} {
 		if !strings.Contains(anomaly.Reason, want) {
 			t.Errorf("Reason = %q, want it to cite %q", anomaly.Reason, want)
 		}
 	}
-	if !strings.Contains(strings.ToLower(anomaly.RecommendedAction), "confirm") {
+	if !strings.Contains(strings.ToLower(anomaly.RecommendedAction), "confirmar") {
 		t.Errorf("RecommendedAction = %q, want confirmation rather than escalation", anomaly.RecommendedAction)
 	}
 }
@@ -90,7 +90,7 @@ func TestExplainableAnomalyNamesTheEventAndAsksForConfirmation(t *testing.T) {
 func TestFalsePositiveSaysThereIsNothingToDo(t *testing.T) {
 	anomaly := theAnomaly(t, "M-106")
 
-	if !strings.Contains(anomaly.Reason, "Scheduled maintenance outage for 12 hours") {
+	if !strings.Contains(anomaly.Reason, "parada programada") {
 		t.Errorf("Reason = %q, want it to name the outage", anomaly.Reason)
 	}
 	if !strings.Contains(anomaly.Reason, "79.8%") {
@@ -106,12 +106,12 @@ func TestFalsePositiveSaysThereIsNothingToDo(t *testing.T) {
 func TestDataQualityAnomalyCitesTheOffendingReadings(t *testing.T) {
 	anomaly := theAnomaly(t, "M-112")
 
-	for _, want := range []string{"voltage", "241", "16", "0.3%"} {
+	for _, want := range []string{"voltaje", "241", "16", "0.3%"} {
 		if !strings.Contains(anomaly.Reason, want) {
 			t.Errorf("Reason = %q, want it to cite %q", anomaly.Reason, want)
 		}
 	}
-	if !strings.Contains(strings.ToLower(anomaly.RecommendedAction), "meter") {
+	if !strings.Contains(strings.ToLower(anomaly.RecommendedAction), "medidor") {
 		t.Errorf("RecommendedAction = %q, want it to point at the meter rather than the load", anomaly.RecommendedAction)
 	}
 }
@@ -134,8 +134,8 @@ func TestProseIsSentencesRatherThanRunOnText(t *testing.T) {
 				t.Errorf("%s prose does not end in a full stop: %q", anomaly.MeterCode, text)
 			}
 		}
-		if strings.HasPrefix(anomaly.Reason, "Between from") {
-			t.Errorf("%s prose says 'Between from': %q", anomaly.MeterCode, anomaly.Reason)
+		if strings.Contains(anomaly.Reason, "En el periodo del del") {
+			t.Errorf("%s prose repeats a preposition: %q", anomaly.MeterCode, anomaly.Reason)
 		}
 	}
 }

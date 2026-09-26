@@ -4,7 +4,7 @@
 
 **Blocked by:** 03 — Salir revocando la sesión; 08 — Analizar CSV compatibles sin memorizar medidores; 11 — Tabla de medidores filtrable y ordenable; 13 — Mejora LLM opcional en español, por fila.
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [ ] El README en español explica `make up` y `make seed`, la cuenta y contraseñas de demo solo local, los datos sintéticos, la opción LLM y un guion de 5–10 minutos con navegación concreta; no ordena ejecutar un análisis antes de abrir la app.
 - [ ] El smoke autenticado comprueba API y formas JSON que lee el frontend: cuatro episodios, dos `HIGH`, M-112 `ALERT/HIGH`, confianza no promediada, `OPEN`, hallazgos de calidad y ausencia de `PATCH` de workflow.

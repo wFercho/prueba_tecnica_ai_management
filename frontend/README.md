@@ -9,9 +9,14 @@ It normally is not run on its own — the API serves its build output, so the da
 and the API share an origin and there is no CORS anywhere:
 
 ```sh
-make up && make seed && make analyze   # from the repository root
+make up && make seed   # from the repository root; analysis is triggered in the UI
 open http://localhost:8090
 ```
+
+Sign in with the local-only demo account `admin@email.com` / `admin`. The initial
+view has no precomputed findings: open M-109 first, then run the analysis from the
+dashboard. The API owns the session and returns a revocable HttpOnly cookie; logging
+out invalidates private queries as well as the session.
 
 From the panel, the meter ID links to `/medidores/M-109`. That URL can also be
 opened directly or refreshed; the breadcrumb returns to `/`, and browser Back
@@ -42,12 +47,14 @@ image. `pnpm lint` runs the project's ESLint config.
 | File | What it holds |
 | :--- | :--- |
 | `src/api.ts` | The types, mirroring the JSON the API actually answers, and one function per route |
-| `src/router.tsx` | Typed page routes and deep-link parameters |
+| `src/router.tsx` | Typed routes, deep links and the session guard |
 | `src/App.tsx` | Shared Spanish navigation frame |
-| `src/views/Dashboard.tsx` | The KPI row, the findings list, and running the detector with polling |
+| `src/views/LoginView.tsx` | Login form and return to the original destination |
+| `src/views/Dashboard.tsx` | KPIs, findings, and running the detector with polling |
+| `src/views/MeterTable.tsx` | Searchable, sortable, filterable meters table |
 | `src/views/MeterView.tsx` | One meter: its series against its baseline, its anomalies, its events |
 | `src/views/AnomalyView.tsx` | The investigation view: evidence, score, prose, and the status decision |
-| `src/components/ConsumptionChart.tsx` | The SVG chart |
+| `src/components/ConsumptionChart.tsx` | Recharts chart with episode bands, Spanish tooltip and accessible data table |
 | `src/components/badges.tsx` | The shared badges and the formatters |
 | `src/index.css` | Tailwind imports and legacy view styles |
 | `smoke.mjs` | A contract walk of the running API: `make smoke` from the root |
@@ -57,7 +64,7 @@ an episode the detector calls 14:00 must not be drawn at a different hour. And c
 is shown as a two-decimal score with its band, never as a percentage of being right,
 because it is an evidence score rather than a probability.
 
-`smoke.mjs` exists because the TypeScript types prove nothing at runtime. It walks the
-live API and asserts that every field these views read exists, has the right type, and
-carries the value the UI claims. It is how the mismatch between the backend's `ALERT`
-health value and the frontend's `WARNING` was found.
+`smoke.mjs` checks the authenticated API without starting an analysis by default.
+Use `SMOKE_ANALYZE=1` only against an isolated stack or after the live demo; it
+asserts the four delivered findings, `ALERT/HIGH` for M-112, and that no `PATCH`
+workflow endpoint exists.

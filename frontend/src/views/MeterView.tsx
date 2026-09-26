@@ -14,6 +14,7 @@ export function MeterView({ meterId }: { meterId: string }) {
   const detailQuery = useQuery({
     queryKey: ['meter', meterId],
     queryFn: () => api.meter(meterId),
+    refetchInterval: (query) => query.state.data?.anomalies.some((a) => a.explanation_status === 'PENDING') ? 1200 : false,
   })
   const summaryQuery = useQuery({ queryKey: ['summary'], queryFn: api.summary })
 
@@ -32,6 +33,9 @@ export function MeterView({ meterId }: { meterId: string }) {
 
   const detail = detailQuery.data
   const { meter, points, baseline, anomalies, events, health, total_kwh } = detail
+  const baselineTotal = points.every((point) => point.baseline_available)
+    ? points.reduce((total, point) => total + point.baseline_kwh, 0) : null
+  const latest = points.at(-1)
 
   return (
     <div>
@@ -42,20 +46,25 @@ export function MeterView({ meterId }: { meterId: string }) {
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start">
       <div className="flex min-w-0 flex-col gap-4">
         <div className="card">
-          <h2>Consumo frente a su baseline</h2>
+          <h2>Consumo frente a su línea base</h2>
           <ConsumptionChart
             points={points.map((point) => ({
               at: new Date(point.timestamp).getTime(),
               value: point.consumption_kwh,
-              baseline: point.baseline_kwh,
+               baseline: point.baseline_available ? point.baseline_kwh : null,
               inAnomaly: point.in_anomaly,
             }))}
-            label={`${meter.meter_id}: consumo horario frente a su baseline`}
+            label={`${meter.meter_id}: consumo horario frente a su línea base`}
           />
           <p className="muted">
-            El baseline representa el consumo habitual de este medidor por hora,
+            La línea base representa el consumo habitual de este medidor por hora,
             calculado a partir de su propio historial.
           </p>
+          <dl className="facts">
+            <dt>Consumo del periodo</dt><dd>{formatKWh(total_kwh)}</dd>
+            <dt>Línea base del mismo periodo</dt><dd>{baselineTotal == null ? 'Sin datos suficientes' : formatKWh(baselineTotal)}</dd>
+            <dt>Última lectura horaria</dt><dd>{latest ? `${formatDateTime(latest.timestamp)} · ${formatKWh(latest.consumption_kwh)}` : 'Sin lecturas'}</dd>
+          </dl>
         </div>
 
         <div className="card">
@@ -97,15 +106,32 @@ export function MeterView({ meterId }: { meterId: string }) {
             <dd>{meter.meter_id}</dd>
             <dt>Salud</dt>
             <dd>
-              {summaryQuery.data.last_run ? <HealthBadge health={health} /> : 'Sin analizar'}
+              <HealthBadge health={health} />
             </dd>
             <dt>Consumo del periodo</dt>
             <dd>{formatKWh(total_kwh)}</dd>
             <dt>Lecturas</dt>
             <dd>{points.length}</dd>
-            <dt>Muestras del baseline</dt>
+            <dt>Muestras de la línea base</dt>
             <dd>{baseline[0]?.samples ?? 0}</dd>
           </dl>
+        </div>
+
+        <div className="card">
+          <h2>Variables eléctricas</h2>
+          <p className="muted">El estado de origen no sustituye el veredicto de calidad: las lecturas afectadas se identifican aparte.</p>
+          <details>
+            <summary className="cursor-pointer text-blue-700">Ver histórico horario de voltaje, corriente y factor de potencia</summary>
+            <div className="max-h-80 overflow-auto">
+              <table><thead><tr><th>Hora UTC</th><th>Voltaje (V)</th><th>Corriente (A)</th><th>Factor de potencia</th><th>Estado de origen</th><th>Evidencia</th></tr></thead>
+                <tbody>{points.map((point) => <tr key={point.timestamp}>
+                  <td>{formatDateTime(point.timestamp)}</td><td>{point.voltage_v?.toFixed(2)}</td>
+                  <td>{point.current_a?.toFixed(2)}</td><td>{point.power_factor?.toFixed(3)}</td>
+                  <td>{point.ingested_status}</td><td>{point.in_anomaly ? 'Lectura afectada' : 'Sin hallazgo'}</td>
+                </tr>)}</tbody>
+              </table>
+            </div>
+          </details>
         </div>
 
         <div className="card">
@@ -119,7 +145,7 @@ export function MeterView({ meterId }: { meterId: string }) {
                   <tr key={`${event.timestamp}-${event.type}`}>
                     <td className="mono">{formatDateTime(event.timestamp)}</td>
                     <td>
-                       <span className="badge muted">{event.type === 'UNKNOWN' ? 'Sin evento reportado (UNKNOWN)' : event.type}</span>
+                       <span className="badge muted">{event.type === 'UNKNOWN' ? 'Sin evento operativo reportado' : event.type === 'SCHEDULED_OUTAGE' ? 'Parada programada' : event.type === 'OPERATIONAL_CHANGE' ? 'Cambio operativo' : 'Reporte de calidad'}</span>
                     </td>
                   </tr>
                 ))}
@@ -137,7 +163,7 @@ export function MeterView({ meterId }: { meterId: string }) {
               <dt>Baseline</dt>
               <dd>{formatKWh(anomalies[0].baseline_kwh)}</dd>
               <dt>Desviación</dt>
-              <dd>{formatPercent(anomalies[0].deviation_percent * 100)}</dd>
+               <dd>{formatPercent(anomalies[0].deviation_percent)}</dd>
               <dt>Lecturas afectadas</dt>
               <dd>{anomalies[0].affected_readings}</dd>
             </dl>

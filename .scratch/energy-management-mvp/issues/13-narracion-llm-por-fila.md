@@ -4,7 +4,7 @@
 
 **Blocked by:** 12 — Investigación con evidencia y solo acción recomendada.
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [ ] Sin key las filas quedan `rules/READY` con razón y recomendación españolas; con key pasan por `rules/PENDING` hasta `llm/READY` o conservan reglas como `rules/FAILED` si el proveedor falla.
 - [ ] El LLM recibe solo identidad, ventana y lecturas del episodio (consumo, baseline, desviación, voltaje, corriente y factor de potencia por hora), reporte de contexto/ausencia, cuatro términos de confianza y hallazgos de calidad; no recibe la serie completa de 336 horas.

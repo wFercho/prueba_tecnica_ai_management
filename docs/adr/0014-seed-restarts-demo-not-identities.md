@@ -8,4 +8,4 @@ Keeping old findings after reimport makes "Último análisis" and the four-resul
 
 ## Consequences
 
-`make up` starts the app and provisions the initial demo user; `make seed` clears analysis outcomes and imports source rows, preserving users and sessions. The evaluator then signs in and presses «Run AI Analysis» in the UI. A second analysis click without reseeding creates a new run and retains history, while the UI shows findings from the latest successful run and warns if a newer attempt failed.
+`make up` starts the app and provisions the initial demo user; `make seed` clears analysis outcomes and imports source rows, preserving users and sessions. The evaluator then signs in and presses «Ejecutar análisis IA» in the UI. A second analysis click without reseeding creates a new run and retains history, while the UI shows findings from the latest successful run and warns if a newer attempt failed.

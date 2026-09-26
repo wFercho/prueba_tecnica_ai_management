@@ -18,6 +18,7 @@ import (
 	"github.com/wFercho/prueba_tecnica_ai_management/backend/internal/ingest"
 	"github.com/wFercho/prueba_tecnica_ai_management/backend/internal/narrate"
 	"github.com/wFercho/prueba_tecnica_ai_management/backend/internal/service"
+	"github.com/wFercho/prueba_tecnica_ai_management/backend/internal/store"
 	"github.com/wFercho/prueba_tecnica_ai_management/backend/internal/store/memory"
 )
 
@@ -31,13 +32,22 @@ type testServer struct {
 	handler http.Handler
 	store   *memory.Store
 	svc     *service.Service
+	cookie  *http.Cookie
 }
 
 func newTestServer(t *testing.T) *testServer {
 	t.Helper()
 	fake := seededStore(t)
 	svc := service.New(fake, narrate.Failing{Err: errModelUnreachable}, analysis.DefaultDetectorConfig())
+	if err := svc.ProvisionUser(t.Context(), "admin@email.com", "admin"); err != nil {
+		t.Fatal(err)
+	}
+	_, token, err := svc.Login(t.Context(), "admin@email.com", "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
 	ts := &testServer{t: t, handler: New(svc, discardLogger()), store: fake, svc: svc}
+	ts.cookie = &http.Cookie{Name: sessionCookie, Value: token}
 	t.Cleanup(svc.WaitForNarration)
 	return ts
 }
@@ -73,6 +83,9 @@ func (ts *testServer) do(method, path string, body any) response {
 	}
 
 	request := httptest.NewRequest(method, path, reader)
+	if ts.cookie != nil {
+		request.AddCookie(ts.cookie)
+	}
 	if body != nil {
 		request.Header.Set("Content-Type", "application/json")
 	}
@@ -330,46 +343,15 @@ func TestAnomalyDetailCarriesTheEvidenceAndTheMeterItBelongsTo(t *testing.T) {
 	}
 }
 
-func TestAnInvestigationCanRecordTheOperatorsDecision(t *testing.T) {
-	ts := newTestServer(t)
-	ts.runAnalysis()
-	id := ts.firstAnomalyID()
-
-	var reply struct {
-		Anomaly analysis.Anomaly `json:"anomaly"`
-	}
-	ts.do(http.MethodPatch, "/anomalies/"+itoa(id),
-		map[string]string{"status": "ACKNOWLEDGED"}).decodeInto(t, http.StatusOK, &reply)
-
-	if reply.Anomaly.Status != catalog.StatusAcknowledged {
-		t.Errorf("status = %q, want ACKNOWLEDGED", reply.Anomaly.Status)
-	}
-
-	// And it sticks, rather than being acknowledged in one request and forgotten
-	// by the next.
-	var listed struct {
-		Anomalies []analysis.Anomaly `json:"anomalies"`
-	}
-	ts.do(http.MethodGet, "/anomalies", nil).decodeInto(t, http.StatusOK, &listed)
-	for _, anomaly := range listed.Anomalies {
-		if anomaly.ID == id && anomaly.Status != catalog.StatusAcknowledged {
-			t.Errorf("anomaly %d reads back as %q", id, anomaly.Status)
-		}
-	}
-}
-
-func TestAnUnknownStatusIsRejectedWithoutTouchingTheFinding(t *testing.T) {
+func TestAnInvestigationOnlyRecommendsActionsWithoutAWorkflowEndpoint(t *testing.T) {
 	ts := newTestServer(t)
 	ts.runAnalysis()
 	id := ts.firstAnomalyID()
 
 	reply := ts.do(http.MethodPatch, "/anomalies/"+itoa(id),
-		map[string]string{"status": "MAYBE"})
-	if reply.status() != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400: %s", reply.status(), reply.body)
-	}
-	if code, _ := reply.errorBody(t); code != "INVALID_REQUEST" {
-		t.Errorf("code = %q, want INVALID_REQUEST", code)
+		map[string]string{"status": "ACKNOWLEDGED"})
+	if reply.status() != http.StatusMethodNotAllowed {
+		t.Fatalf("status = %d, want 405: %s", reply.status(), reply.body)
 	}
 
 	var listed struct {
@@ -494,6 +476,65 @@ func TestTheDeliveredDatasetComesBackWithTheFourExpectedCases(t *testing.T) {
 	}
 }
 
+func TestQualityMeterStaysAlertWithSixteenIntermittentAffectedHours(t *testing.T) {
+	ts := newTestServerWithDeliveredData(t)
+	ts.runAnalysis()
+	var summary service.Dashboard
+	ts.do(http.MethodGet, "/dashboard/summary", nil).decodeInto(t, http.StatusOK, &summary)
+	if summary.HighPriority != 2 || summary.LastSuccessfulRun == nil {
+		t.Fatalf("priority = %d, completed = %+v", summary.HighPriority, summary.LastSuccessfulRun)
+	}
+	for _, row := range summary.Meters {
+		if row.MeterID == "M-112" && (row.Health != service.HealthAlert || row.WorstSeverity != analysis.SeverityHigh) {
+			t.Errorf("M-112 is %+v, want ALERT/HIGH", row)
+		}
+	}
+	var detail service.MeterDetail
+	ts.do(http.MethodGet, "/meters/M-112", nil).decodeInto(t, http.StatusOK, &detail)
+	affected := 0
+	for _, point := range detail.Points {
+		if point.InAnomaly {
+			affected++
+			if point.IngestedStatus != "OK" {
+				t.Errorf("the source status was overwritten: %q", point.IngestedStatus)
+			}
+		}
+	}
+	if affected != 16 {
+		t.Errorf("M-112 has %d affected hours, want exactly 16", affected)
+	}
+}
+
+func TestAFailedAttemptLeavesTheLastCompletedResultsVisible(t *testing.T) {
+	ts := newTestServerWithDeliveredData(t)
+	completed := ts.runAnalysis()
+	window := time.Now().UTC()
+	failed, err := ts.store.StartRun(t.Context(), window, window)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ts.store.FinishRun(t.Context(), failed, store.RunFailed, 0, "simulated failure"); err != nil {
+		t.Fatal(err)
+	}
+	var summary service.Dashboard
+	ts.do(http.MethodGet, "/dashboard/summary", nil).decodeInto(t, http.StatusOK, &summary)
+	if summary.LastRun == nil || summary.LastRun.ID != failed || summary.LastSuccessfulRun == nil || summary.LastSuccessfulRun.ID != completed {
+		t.Errorf("last attempt = %+v; last success = %+v", summary.LastRun, summary.LastSuccessfulRun)
+	}
+	var listed struct {
+		Anomalies []analysis.Anomaly `json:"anomalies"`
+	}
+	ts.do(http.MethodGet, "/anomalies", nil).decodeInto(t, http.StatusOK, &listed)
+	if len(listed.Anomalies) != 4 {
+		t.Fatalf("after failure, found %d previous anomalies, want four", len(listed.Anomalies))
+	}
+	for _, anomaly := range listed.Anomalies {
+		if anomaly.RunID != completed {
+			t.Errorf("stale result attribution: %+v", anomaly)
+		}
+	}
+}
+
 // runReply mirrors the run payload so the tests read exactly the fields a client
 // sees, and cannot silently depend on a Go struct the API does not expose.
 type runReply struct {
@@ -538,6 +579,14 @@ func newTestServerWithDeliveredData(t *testing.T) *testServer {
 	}
 	svc := service.New(fake, narrate.Failing{Err: errModelUnreachable}, analysis.DefaultDetectorConfig())
 	ts := &testServer{t: t, handler: New(svc, discardLogger()), store: fake, svc: svc}
+	if err := svc.ProvisionUser(t.Context(), "admin@email.com", "admin"); err != nil {
+		t.Fatal(err)
+	}
+	_, token, err := svc.Login(t.Context(), "admin@email.com", "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts.cookie = &http.Cookie{Name: sessionCookie, Value: token}
 	t.Cleanup(svc.WaitForNarration)
 	return ts
 }

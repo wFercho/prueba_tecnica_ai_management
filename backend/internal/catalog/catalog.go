@@ -86,10 +86,7 @@ func (e OperationalEvent) Explains() bool {
 type AnomalyStatus string
 
 const (
-	StatusOpen         AnomalyStatus = "OPEN"
-	StatusAcknowledged AnomalyStatus = "ACKNOWLEDGED"
-	StatusResolved     AnomalyStatus = "RESOLVED"
-	StatusDismissed    AnomalyStatus = "DISMISSED"
+	StatusOpen AnomalyStatus = "OPEN"
 )
 
 // ExplanationSource is who wrote an anomaly's prose.

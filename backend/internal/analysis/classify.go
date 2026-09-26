@@ -90,6 +90,9 @@ type Evidence struct {
 // a type, a severity, a confidence and a recommended action. A meter under two
 // separate episodes has two anomalies.
 type Anomaly struct {
+	// Anomaly means this candidate episode was examined, including an explained
+	// false positive; it is not a claim that the operator must escalate it.
+	Anomaly     bool      `json:"anomaly"`
 	ID          int64     `json:"id,omitempty"`
 	MeterCode   string    `json:"meter_id"`
 	RunID       int64     `json:"run_id,omitempty"`
@@ -176,6 +179,7 @@ type EventSummary struct {
 //     whether other independent measurements moved with it.
 func Classify(episode Episode, cfg DetectorConfig) Anomaly {
 	anomaly := Anomaly{
+		Anomaly:           true,
 		MeterCode:         string(episode.MeterCode),
 		WindowStart:       episode.Start.UTC(),
 		WindowEnd:         episode.End.UTC(),

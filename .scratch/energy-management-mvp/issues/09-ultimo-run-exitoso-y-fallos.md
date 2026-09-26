@@ -4,7 +4,7 @@
 
 **Blocked by:** 05 — Ejecutar análisis y ver cuatro episodios inmediatamente.
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [ ] Dos ejecuciones correctas del mismo dataset conservan dos runs atribuibles pero el panel, la tabla y las fichas muestran solo los cuatro episodios del último run completado, nunca ocho ni una mezcla.
 - [ ] Un intento que falla antes de persistir anomalías queda registrado como `FAILED`; el estado/fecha del intento reciente se muestran separados de la fecha y los resultados del último run exitoso.

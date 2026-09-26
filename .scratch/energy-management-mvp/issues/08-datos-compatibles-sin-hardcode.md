@@ -4,7 +4,7 @@
 
 **Blocked by:** 07 — Investigar la calidad intermitente de M-112.
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [ ] Casos contrafactuales con IDs/fechas distintos mantienen el razonamiento de los cuatro tipos sin reglas por identificador y sin acceso a ground truth reservado.
 - [ ] M-112 sigue detectándose sin el reporte de calidad; `UNKNOWN` para un caso como M-109 se entiende como reporte de **ausencia** y no como evento que excuse la desviación.

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/wFercho/prueba_tecnica_ai_management/backend/internal/analysis"
 	"github.com/wFercho/prueba_tecnica_ai_management/backend/internal/catalog"
@@ -208,6 +209,52 @@ func TestM112IsReportedAsDataQualityWithItsCorruptReadings(t *testing.T) {
 		return
 	}
 	t.Fatal("M-112 produced no anomaly")
+}
+
+func TestDetectorGeneralizesToRenamedMetersAndShiftedDates(t *testing.T) {
+	readings, events := loadDataset(t)
+	for i := range readings {
+		readings[i].MeterCode = catalog.MeterCode("ALT-" + string(readings[i].MeterCode))
+		readings[i].Timestamp = readings[i].Timestamp.Add(30 * 24 * time.Hour)
+	}
+	for i := range events {
+		events[i].MeterCode = catalog.MeterCode("ALT-" + string(events[i].MeterCode))
+		events[i].Timestamp = events[i].Timestamp.Add(30 * 24 * time.Hour)
+	}
+	want := map[string]analysis.AnomalyType{
+		"ALT-M-104": analysis.AnomalyExplainable,
+		"ALT-M-106": analysis.AnomalyFalsePositive,
+		"ALT-M-109": analysis.AnomalyReal,
+		"ALT-M-112": analysis.AnomalyDataQuality,
+	}
+	got := analysis.Analyze(readings, events, analysis.DefaultDetectorConfig())
+	if len(got) != 4 {
+		t.Fatalf("shifted dataset produced %d findings, want 4", len(got))
+	}
+	for _, finding := range got {
+		if finding.Type != want[finding.MeterCode] || !finding.Anomaly {
+			t.Errorf("unexpected finding %+v", finding)
+		}
+	}
+}
+
+func TestDataQualityNeedsElectricalEvidenceNotTheContextLabel(t *testing.T) {
+	readings, events := loadDataset(t)
+	filtered := events[:0]
+	for _, event := range events {
+		if event.MeterCode != "M-112" {
+			filtered = append(filtered, event)
+		}
+	}
+	for _, finding := range analysis.Analyze(readings, filtered, analysis.DefaultDetectorConfig()) {
+		if finding.MeterCode == "M-112" {
+			if finding.Type != analysis.AnomalyDataQuality || finding.AffectedReadings != 16 {
+				t.Fatalf("without the report: %+v", finding)
+			}
+			return
+		}
+	}
+	t.Fatal("physical inconsistencies went unnoticed without the quality report")
 }
 
 func abs(v float64) float64 {

@@ -13,6 +13,8 @@ const HEALTH_CLASS: Record<Health, string> = {
   CRITICAL: 'high',
   ALERT: 'medium',
   HEALTHY: 'low',
+  UNASSESSED: 'muted',
+  INSUFFICIENT_DATA: 'muted',
 }
 
 const TYPE_LABEL: Record<string, string> = {
@@ -23,8 +25,8 @@ const TYPE_LABEL: Record<string, string> = {
 }
 
 const BAND_LABEL: Record<Severity, string> = { HIGH: 'Alta', MEDIUM: 'Media', LOW: 'Baja' }
-const HEALTH_LABEL: Record<Health, string> = { CRITICAL: 'Crítico', ALERT: 'Alerta', HEALTHY: 'Normal' }
-const STATUS_LABEL: Record<AnomalyStatus, string> = { OPEN: 'Abierta', ACKNOWLEDGED: 'Reconocida', RESOLVED: 'Resuelta', DISMISSED: 'Descartada' }
+const HEALTH_LABEL: Record<Health, string> = { CRITICAL: 'Crítico', ALERT: 'Alerta', HEALTHY: 'Normal', UNASSESSED: 'Sin analizar', INSUFFICIENT_DATA: 'Sin datos suficientes' }
+const STATUS_LABEL: Record<AnomalyStatus, string> = { OPEN: 'Abierta' }
 
 export function SeverityBadge({ severity }: { severity: Severity }) {
   return <span className={`badge ${SEVERITY_CLASS[severity]}`}>{BAND_LABEL[severity]}</span>
@@ -56,8 +58,7 @@ export function ConfidenceBadge({
 }
 
 export function StatusBadge({ status }: { status: AnomalyStatus }) {
-  const cls = status === 'OPEN' ? '' : status === 'DISMISSED' ? 'muted' : 'low'
-  return <span className={`badge ${cls}`}>{STATUS_LABEL[status]}</span>
+  return <span className="badge">{STATUS_LABEL[status]}</span>
 }
 
 // Confidence is described in words rather than as a percentage of being right,

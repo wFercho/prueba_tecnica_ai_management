@@ -35,11 +35,15 @@ func writeFile(t *testing.T, path, contents string) {
 // server command uses.
 func servedDashboard(t *testing.T, dir string) http.Handler {
 	t.Helper()
-	handler := New(newTestServer(t).service(), discardLogger())
+	ts := newTestServer(t)
+	handler := New(ts.service(), discardLogger())
 	if err := handler.ServeDashboard(dir, discardLogger()); err != nil {
 		t.Fatalf("ServeDashboard: %v", err)
 	}
-	return handler
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.AddCookie(ts.cookie)
+		handler.ServeHTTP(w, r)
+	})
 }
 
 func request(handler http.Handler, method, path string) *httptest.ResponseRecorder {

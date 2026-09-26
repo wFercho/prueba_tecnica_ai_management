@@ -34,7 +34,9 @@ type Config struct {
 	// APIKey enables the narrator. Empty is the supported case, not a misconfiguration:
 	// the deterministic explanations are the product's floor.
 	APIKey string
-	Model  string
+	// DemoPassword provisions the local demo account on first boot only.
+	DemoPassword string
+	Model        string
 	// BaseURL points the narrator at a different endpoint, so a reviewer without an
 	// OpenAI key can still exercise the model path against a local stub.
 	BaseURL     string
@@ -54,15 +56,16 @@ const (
 // a default for it.
 func Load(env environment) (Config, error) {
 	cfg := Config{
-		DatabaseURL: value(env, "DATABASE_URL", defaultDatabaseURL),
-		Host:        strings.TrimSpace(env["HOST"]),
-		DataDir:     value(env, "DATA_DIR", defaultDataDir()),
-		StaticDir:   value(env, "STATIC_DIR", defaultStaticDir()),
-		APIKey:      strings.TrimSpace(env["OPENAI_API_KEY"]),
-		Model:       value(env, "OPENAI_MODEL", defaultModel),
-		BaseURL:     strings.TrimSpace(env["OPENAI_BASE_URL"]),
-		LogLevel:    strings.ToLower(value(env, "LOG_LEVEL", defaultLogLevel)),
-		ShowVersion: env["SHOW_VERSION"] == "1",
+		DatabaseURL:  value(env, "DATABASE_URL", defaultDatabaseURL),
+		Host:         strings.TrimSpace(env["HOST"]),
+		DataDir:      value(env, "DATA_DIR", defaultDataDir()),
+		StaticDir:    value(env, "STATIC_DIR", defaultStaticDir()),
+		APIKey:       strings.TrimSpace(env["OPENAI_API_KEY"]),
+		DemoPassword: value(env, "DEMO_PASSWORD", "admin"),
+		Model:        value(env, "OPENAI_MODEL", defaultModel),
+		BaseURL:      strings.TrimSpace(env["OPENAI_BASE_URL"]),
+		LogLevel:     strings.ToLower(value(env, "LOG_LEVEL", defaultLogLevel)),
+		ShowVersion:  env["SHOW_VERSION"] == "1",
 	}
 
 	port, err := port(env["PORT"])

@@ -4,7 +4,7 @@
 
 **Blocked by:** 10 — Panel con prioridad, salud y confianza correctas.
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [ ] La tabla muestra identificador, nombre/ubicación etiquetados como sintéticos, consumo del periodo, variación contra baseline comparable, salud y columna «Anomalía» con severidad separada.
 - [ ] TanStack Table ofrece filtros Todos/Normales/Alertas/Críticos, búsqueda por `meter_id` y orden por consumo, variación y severidad; el estado sin análisis y la salud insuficientemente evaluada no aparecen como «Normal».

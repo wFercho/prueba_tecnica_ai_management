@@ -57,9 +57,6 @@ func TestStoreReturnsNotFoundRatherThanZeroValues(t *testing.T) {
 	if _, err := s.Anomaly(ctx, 404); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("Anomaly err = %v, want ErrNotFound", err)
 	}
-	if err := s.SetStatus(ctx, 404, store.StatusResolved); !errors.Is(err, store.ErrNotFound) {
-		t.Errorf("SetStatus err = %v, want ErrNotFound", err)
-	}
 }
 
 func TestStoreOrdersAnomaliesTheWayAnOperatorReadsThem(t *testing.T) {
@@ -77,6 +74,9 @@ func TestStoreOrdersAnomaliesTheWayAnOperatorReadsThem(t *testing.T) {
 	}
 	if err := s.SaveAnomalies(ctx, runID, saved); err != nil {
 		t.Fatalf("SaveAnomalies: %v", err)
+	}
+	if err := s.FinishRun(ctx, runID, store.RunCompleted, len(saved), ""); err != nil {
+		t.Fatal(err)
 	}
 
 	anomalies, err := s.Anomalies(ctx)
@@ -105,6 +105,7 @@ func TestNarrationReplacesProseAndRecordsWhoWroteIt(t *testing.T) {
 	if err := s.SaveAnomalies(ctx, runID, []analysis.Anomaly{anomaly(analysis.AnomalyReal, analysis.SeverityHigh, 0.9)}); err != nil {
 		t.Fatalf("SaveAnomalies: %v", err)
 	}
+	s.FinishRun(ctx, runID, store.RunCompleted, 1, "")
 	stored, _ := s.Anomalies(ctx)
 
 	if err := s.Narrate(ctx, stored[0].ID, store.SourceLLM, "narrated", "act"); err != nil {
@@ -127,6 +128,7 @@ func TestFailedNarrationLeavesTheRulesProseInPlace(t *testing.T) {
 	if err := s.SaveAnomalies(ctx, runID, []analysis.Anomaly{anomaly(analysis.AnomalyReal, analysis.SeverityHigh, 0.9)}); err != nil {
 		t.Fatalf("SaveAnomalies: %v", err)
 	}
+	s.FinishRun(ctx, runID, store.RunCompleted, 1, "")
 	stored, _ := s.Anomalies(ctx)
 
 	if err := s.MarkNarrationFailed(ctx, stored[0].ID); err != nil {
@@ -151,8 +153,10 @@ func TestAnomaliesReturnsOnlyTheLatestRun(t *testing.T) {
 
 	first, _ := s.StartRun(ctx, at(1), at(2))
 	s.SaveAnomalies(ctx, first, []analysis.Anomaly{anomaly(analysis.AnomalyReal, analysis.SeverityHigh, 0.9)})
+	s.FinishRun(ctx, first, store.RunCompleted, 1, "")
 	second, _ := s.StartRun(ctx, at(1), at(2))
 	s.SaveAnomalies(ctx, second, []analysis.Anomaly{anomaly(analysis.AnomalyDataQuality, analysis.SeverityHigh, 0.9)})
+	s.FinishRun(ctx, second, store.RunCompleted, 1, "")
 
 	anomalies, err := s.Anomalies(ctx)
 	if err != nil {

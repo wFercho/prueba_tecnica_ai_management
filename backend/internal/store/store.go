@@ -65,6 +65,32 @@ type Store interface {
 	RunWriter
 	AnomalyReader
 	AnomalyWriter
+	IdentityStore
+	DatasetReplacer
+}
+
+// DatasetReplacer atomically replaces source rows and derived results while
+// preserving provisioned users and sessions.
+type DatasetReplacer interface {
+	ReplaceDataset(ctx context.Context, meters []catalog.Meter, readings []catalog.Reading, events []catalog.OperationalEvent) error
+}
+
+// IdentityStore persists password hashes and revocable sessions independently of
+// the readings, which can be reset without logging users out.
+type IdentityStore interface {
+	ProvisionUser(ctx context.Context, email string, passwordHash []byte) error
+	UserByEmail(ctx context.Context, email string) (User, error)
+	CreateSession(ctx context.Context, userID int64, tokenHash []byte, expiresAt time.Time) error
+	SessionUser(ctx context.Context, tokenHash []byte) (User, error)
+	RevokeSession(ctx context.Context, tokenHash []byte) error
+}
+
+// User is an administratively provisioned account. Its hash is never serialized
+// into HTTP responses or placed in a cookie.
+type User struct {
+	ID           int64
+	Email        string
+	PasswordHash []byte
 }
 
 // MeterReader reads the meter catalogue.
@@ -130,6 +156,9 @@ type RunReader interface {
 	Run(ctx context.Context, runID int64) (Run, error)
 	// LatestRun returns the most recent run, or ErrNotFound when none has run.
 	LatestRun(ctx context.Context) (Run, error)
+	// LatestCompletedRun selects the most recent trustworthy result, even if a
+	// later attempt failed or is still running.
+	LatestCompletedRun(ctx context.Context) (Run, error)
 }
 
 // RunWriter records what the detector did.
@@ -155,15 +184,14 @@ type AnomalyWriter interface {
 	// in place. A failed narration is visible as failed rather than absent
 	// (ADR-0006).
 	MarkNarrationFailed(ctx context.Context, anomalyID int64) error
-	// SetStatus moves an anomaly between OPEN, ACKNOWLEDGED, RESOLVED and
-	// DISMISSED, which is what the investigation view writes.
-	SetStatus(ctx context.Context, anomalyID int64, status AnomalyStatus) error
 }
 
 // AnomalyReader reads findings.
 type AnomalyReader interface {
 	// Anomalies returns the latest run's anomalies, most urgent first.
 	Anomalies(ctx context.Context) ([]analysis.Anomaly, error)
+	// RunAnomalies returns exactly one run's findings for its narration/progress.
+	RunAnomalies(ctx context.Context, runID int64) ([]analysis.Anomaly, error)
 	// Anomaly returns one anomaly with its per-hour deviation series, for the
 	// investigation view.
 	Anomaly(ctx context.Context, id int64) (AnomalyDetail, error)
@@ -196,10 +224,7 @@ type (
 )
 
 const (
-	StatusOpen         = catalog.StatusOpen
-	StatusAcknowledged = catalog.StatusAcknowledged
-	StatusResolved     = catalog.StatusResolved
-	StatusDismissed    = catalog.StatusDismissed
+	StatusOpen = catalog.StatusOpen
 
 	SourceRules = catalog.SourceRules
 	SourceLLM   = catalog.SourceLLM

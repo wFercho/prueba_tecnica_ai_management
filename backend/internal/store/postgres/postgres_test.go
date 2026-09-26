@@ -44,7 +44,7 @@ func testDB(t *testing.T) *DB {
 func wipe(t *testing.T, db *DB) {
 	t.Helper()
 	if _, err := db.Exec(context.Background(),
-		`TRUNCATE readings, events, anomalies, analysis_runs, meters RESTART IDENTITY CASCADE`); err != nil {
+		`TRUNCATE sessions, users, readings, events, anomalies, analysis_runs, meters RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
 }
@@ -313,16 +313,8 @@ func TestARunAndItsAnomaliesSurviveTheRoundTrip(t *testing.T) {
 		t.Errorf("a failed narration should leave the rules prose and mark itself failed, got %+v", failed)
 	}
 
-	// The operator's decision is its own field and never the detector's to set.
-	if err := db.SetStatus(ctx, stored[1].ID, catalog.StatusAcknowledged); err != nil {
-		t.Fatalf("SetStatus: %v", err)
-	}
-	acknowledged, err := db.Anomaly(ctx, stored[1].ID)
-	if err != nil {
-		t.Fatalf("Anomaly: %v", err)
-	}
-	if acknowledged.Status != catalog.StatusAcknowledged {
-		t.Errorf("the status is %s, want ACKNOWLEDGED", acknowledged.Status)
+	if failed.Status != catalog.StatusOpen {
+		t.Errorf("narration changed the only supported review status to %s", failed.Status)
 	}
 }
 

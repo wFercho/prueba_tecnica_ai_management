@@ -4,7 +4,7 @@
 
 **Blocked by:** 02 — Iniciar sesión con una cuenta de demo persistida.
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [ ] La importación explícita reemplaza medidores, lecturas y reportes de contexto y elimina runs/anomalías derivados como una operación segura ante fallos; repetirla deja exactamente el mismo dataset de entrada.
 - [ ] Usuarios y sesiones no se borran ni se reprovisionan en cada seed; un usuario ya autenticado puede consultar los datos recién importados.

@@ -94,3 +94,50 @@ func TestAnalyzeIsStableInItsOrder(t *testing.T) {
 		t.Errorf("first anomaly is %s, want M-1", first[0].MeterCode)
 	}
 }
+
+func TestDataQualityEpisodesSplitWhenTheGapExceedsThreeHours(t *testing.T) {
+	readings := synthetic("M-SPLIT", 14, flatThen(14, 10, 30, 30))
+	for _, hour := range []int{0, 1, 2, 10, 11, 12} {
+		readings[10*24+hour].VoltageV = 241.2
+	}
+	episodes := FindDataQualityEpisodes(readings, DefaultDetectorConfig())
+	if len(episodes) != 2 {
+		t.Fatalf("got %d episodes, want 2 separated by an 8-hour gap", len(episodes))
+	}
+	for _, episode := range episodes {
+		if episode.ReadingCount() != 3 {
+			t.Errorf("episode has %d readings, want 3 and no merging", episode.ReadingCount())
+		}
+	}
+}
+
+func TestDataQualityGroupsIntermittentFindingsWithinThreeHours(t *testing.T) {
+	readings := synthetic("M-GROUP", 14, flatThen(14, 10, 30, 30))
+	for _, hour := range []int{0, 3, 6, 9, 12, 15} {
+		readings[10*24+hour].VoltageV = 241.2
+	}
+	episodes := FindDataQualityEpisodes(readings, DefaultDetectorConfig())
+	if len(episodes) != 1 {
+		t.Fatalf("got %d episodes, want 1 grouped across 3-hour gaps", len(episodes))
+	}
+	if got := episodes[0].ReadingCount(); got != 6 {
+		t.Errorf("grouped %d affected readings, want 6 without the normal hours between them", got)
+	}
+}
+
+func TestOneMeterKeepsConsumptionAndQualityEpisodesDistinct(t *testing.T) {
+	readings := synthetic("M-BOTH", 14, flatThen(14, 10, 30, 60))
+	for _, hour := range []int{0, 1, 2, 3} {
+		readings[5*24+hour].VoltageV = 241.2
+	}
+	anomalies := Analyze(readings, nil, DefaultDetectorConfig())
+	types := map[AnomalyType]bool{}
+	for _, anomaly := range anomalies {
+		if anomaly.MeterCode == "M-BOTH" {
+			types[anomaly.Type] = true
+		}
+	}
+	if !types[AnomalyReal] || !types[AnomalyDataQuality] {
+		t.Fatalf("got types %v, want both REAL and DATA_QUALITY on one meter", types)
+	}
+}

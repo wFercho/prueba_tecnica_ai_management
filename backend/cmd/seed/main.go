@@ -92,13 +92,7 @@ func run() error {
 		return err
 	}
 
-	if err := db.UpsertMeters(ctx, meters); err != nil {
-		return err
-	}
-	if err := db.AppendReadings(ctx, readings); err != nil {
-		return err
-	}
-	if err := db.AppendEvents(ctx, events); err != nil {
+	if err := db.ReplaceDataset(ctx, meters, readings, events); err != nil {
 		return err
 	}
 

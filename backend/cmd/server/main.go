@@ -58,6 +58,9 @@ func run() error {
 	narrator := chooseNarrator(cfg, log)
 	svc := service.New(db, narrator, analysis.DefaultDetectorConfig())
 	svc.SetLogger(log)
+	if err := svc.ProvisionUser(ctx, "admin@email.com", cfg.DemoPassword); err != nil {
+		return fmt.Errorf("provision demo account: %w", err)
+	}
 
 	handler := httpapi.New(svc, log)
 	// A missing frontend build is not a reason to refuse to serve the API.

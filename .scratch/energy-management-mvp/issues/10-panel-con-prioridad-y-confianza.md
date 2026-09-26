@@ -4,7 +4,7 @@
 
 **Blocked by:** 09 — Conservar el último run exitoso cuando otro falla.
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [ ] El panel muestra los seis grupos de KPI pedidos: consumo total del periodo, medidores, episodios del último run exitoso, alta prioridad, confianza IA y fecha/hora/estado del último intento.
 - [ ] «Alta prioridad» cuenta solo severidad `HIGH` y da 2 en los CSV entregados; `MEDIUM` no se suma a esa cifra.

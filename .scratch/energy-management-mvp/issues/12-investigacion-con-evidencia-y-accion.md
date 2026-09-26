@@ -4,7 +4,7 @@
 
 **Blocked by:** 06 — Gráfico temporal legible de M-109; 07 — Investigar la calidad intermitente de M-112; 09 — Conservar el último run exitoso cuando otro falla.
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [ ] El detalle muestra tipo, severidad, banda y score de confianza con los cuatro términos, comparación real/baseline, serie del episodio, variables eléctricas, reporte de contexto o ausencia de evento, hallazgos de calidad y acción recomendada en español.
 - [ ] M-106 explica la parada programada y dice «No escalar»; M-109 muestra que `UNKNOWN` no es explicación y queda primero para investigar; M-112 conserva valores ofensores y `status=OK` como afirmación de origen.

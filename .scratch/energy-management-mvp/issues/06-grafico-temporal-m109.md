@@ -4,7 +4,7 @@
 
 **Blocked by:** 05 — Ejecutar análisis y ver cuatro episodios inmediatamente.
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [ ] Un spike temprano con Recharts verifica los cuatro criterios antes de migrar los demás gráficos: banda diferenciada que no tape el baseline, tooltip español con hora/real/baseline/desviación, eje legible por días y 58 horas como bloque continuo.
 - [ ] El gráfico antes del primer análisis muestra lecturas y baseline sin banda; después usa la ventana del episodio realmente persistido y no una marca especial por ID de medidor.

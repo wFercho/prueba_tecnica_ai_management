@@ -1,51 +1,40 @@
-import { useState } from 'react'
-import { Link } from '@tanstack/react-router'
+import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, type Anomaly, type Run } from '../api'
+import { api, type Run } from '../api'
 import {
-  ConfidenceBadge,
-  HealthBadge,
+  BandOnly,
   RunStateBadge,
-  SeverityBadge,
-  StatusBadge,
-  TypeBadge,
 } from '../components/badges'
 import { formatDateTime, formatKWh, formatNumber } from '../components/format'
 import type { Summary } from '../api'
-
-function AnomalyRow({ anomaly }: { anomaly: Anomaly }) {
-  return (
-    <Link
-      to="/hallazgos/$anomalyId"
-      params={{ anomalyId: String(anomaly.id) }}
-      className={`anomaly sev-${anomaly.severity}`}
-    >
-      <span className="anomaly-head">
-        <span className="anomaly-meter">{anomaly.meter_id}</span>
-        <TypeBadge type={anomaly.type} />
-        <SeverityBadge severity={anomaly.severity} />
-        <ConfidenceBadge band={anomaly.confidence_band} confidence={anomaly.confidence} />
-        <StatusBadge status={anomaly.status} />
-        <span className="anomaly-when">
-          {formatDateTime(anomaly.window_start)} → {formatDateTime(anomaly.window_end)}
-        </span>
-      </span>
-      <p className="anomaly-reason">{anomaly.affected_readings} lecturas afectadas. Abrir el hallazgo para ver su evidencia.</p>
-    </Link>
-  )
-}
+import { MeterTable } from './MeterTable'
+import { AnomalyTable } from './AnomalyTable'
 
 export function Dashboard() {
   const queryClient = useQueryClient()
-  const summaryQuery = useQuery({ queryKey: ['summary'], queryFn: api.summary })
-  const anomaliesQuery = useQuery({ queryKey: ['anomalies'], queryFn: api.anomalies })
   const [runId, setRunId] = useState<number | null>(null)
+  const summaryQuery = useQuery({ queryKey: ['summary'], queryFn: api.summary })
+  const activeRunId = runId ?? ((summaryQuery.data?.last_run?.narrating ?? 0) > 0 ? summaryQuery.data?.last_run?.id ?? null : null)
   const runQuery = useQuery({
-    queryKey: ['run', runId],
-    queryFn: () => api.analysis(runId!),
-    enabled: runId !== null,
+    queryKey: ['run', activeRunId],
+    queryFn: () => api.analysis(activeRunId!),
+    enabled: activeRunId !== null,
     refetchInterval: (query) => (query.state.data?.run.narrating ?? 0) > 0 ? 700 : false,
   })
+  const anomaliesQuery = useQuery({ queryKey: ['anomalies'], queryFn: api.anomalies })
+  const pendingNarration = runQuery.data?.run.narrating ?? 0
+  const previousNarration = useRef<number | null>(null)
+  useEffect(() => {
+    if (activeRunId === null || !runQuery.data) return
+    if (previousNarration.current === pendingNarration) return
+    previousNarration.current = pendingNarration
+    void Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['summary'] }),
+      queryClient.invalidateQueries({ queryKey: ['anomalies'] }),
+      queryClient.invalidateQueries({ queryKey: ['anomaly'] }),
+      queryClient.invalidateQueries({ queryKey: ['meter'] }),
+    ])
+  }, [pendingNarration, activeRunId, runQuery.data, queryClient])
   const analyze = useMutation({
     mutationFn: api.analyze,
     onSuccess: async ({ run }) => {
@@ -68,6 +57,7 @@ export function Dashboard() {
   const summary: Summary = summaryQuery.data
   const anomalies = anomaliesQuery.data.anomalies
   const lastRun: Run | null = runQuery.data?.run ?? summary.last_run
+  const lastSuccessful = summary.last_successful_run
   const narrating = lastRun?.narrating ?? 0
   const working = analyze.isPending || narrating > 0
 
@@ -75,16 +65,27 @@ export function Dashboard() {
     <>
       <section className="grid kpis">
         <div className="card">
-          <div className="kpi-value">{anomalies.length}</div>
+          <div className="kpi-value">{lastSuccessful ? anomalies.length : 'Pendiente'}</div>
           <div className="kpi-label">anomalías del último análisis</div>
         </div>
         <div className="card">
-          <div className="kpi-value">{summary.needs_attention}</div>
-          <div className="kpi-label">pendientes de revisión</div>
+          <div className="kpi-value">{lastSuccessful ? summary.high_priority : 'Pendiente'}</div>
+          <div className="kpi-label">prioridad alta · severidad HIGH</div>
         </div>
         <div className="card">
           <div className="kpi-value">{formatNumber(summary.total_kwh)}</div>
           <div className="kpi-label">kWh en el periodo</div>
+        </div>
+        <div className="card">
+          <div className="kpi-value">{summary.meters.length}</div>
+          <div className="kpi-label">medidores</div>
+        </div>
+        <div className="card">
+          <div className="kpi-value">{summary.priority_confidence && anomalies[0]
+            ? <><BandOnly band={summary.priority_confidence} /> <span className="text-base">({anomalies[0].meter_id})</span></>
+            : 'Pendiente'}</div>
+          <div className="kpi-label">confianza del caso más urgente (evidencia, no probabilidad)</div>
+          {lastSuccessful && <p className="muted">Bandas: alta {summary.confidence_bands.HIGH ?? 0} · media {summary.confidence_bands.MEDIUM ?? 0} · baja {summary.confidence_bands.LOW ?? 0}</p>}
         </div>
         <div className="card">
           <div className="kpi-value">
@@ -96,11 +97,15 @@ export function Dashboard() {
           </div>
           <div className="kpi-label">
             {lastRun
-              ? `${formatDateTime(lastRun.window_start)} → ${formatDateTime(lastRun.window_end)}`
+              ? `Intento: ${formatDateTime(lastRun.started_at)}`
               : 'Ejecuta el análisis para ver los hallazgos'}
           </div>
         </div>
       </section>
+
+      {lastRun?.state === 'FAILED' && lastSuccessful && (
+        <p role="status" className="notice error">Resultados anteriores: el último análisis falló. Los hallazgos mostrados corresponden al run {lastSuccessful.id}.</p>
+      )}
 
       {(analyze.isError || runQuery.isError) && (
         <p className="notice error" role="alert">No se pudo completar el análisis. Inténtalo de nuevo.</p>
@@ -112,14 +117,10 @@ export function Dashboard() {
             <h2>Hallazgos, por urgencia</h2>
             {anomalies.length === 0 ? (
               <p className="empty">
-                {lastRun ? 'No hay anomalías en el último análisis.' : 'Pendiente de análisis: aún no hay resultados.'}
+                {lastSuccessful ? 'No hay anomalías en el último análisis exitoso.' : 'Pendiente de análisis: aún no hay resultados.'}
               </p>
             ) : (
-              <div className="anomaly-list">
-                {anomalies.map((anomaly) => (
-                  <AnomalyRow key={anomaly.id} anomaly={anomaly} />
-                ))}
-              </div>
+              <AnomalyTable anomalies={anomalies} />
             )}
           </div>
         </div>
@@ -156,26 +157,7 @@ export function Dashboard() {
 
           <div className="card">
             <h2>Medidores</h2>
-            <table>
-              <thead>
-                <tr>
-                  <th>Medidor</th>
-                  <th>Salud</th>
-                  <th className="num">kWh</th>
-                </tr>
-              </thead>
-              <tbody>
-                {summary.meters.map((meter) => (
-                  <tr key={meter.meter_id}>
-                    <td><Link className="rounded-sm font-medium text-blue-700 underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700" to="/medidores/$meterId" params={{ meterId: meter.meter_id }}>{meter.meter_id}</Link></td>
-                    <td>
-                      <HealthBadge health={meter.health} />
-                    </td>
-                    <td className="num">{formatNumber(meter.total_kwh)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <MeterTable meters={summary.meters} />
           </div>
 
           {lastRun && (

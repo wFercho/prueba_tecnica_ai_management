@@ -43,8 +43,8 @@ func TestOpenAINarratesAConfirmingModel(t *testing.T) {
 			t.Errorf("Authorization = %q, want the key as a bearer token", got)
 		}
 		w.Write([]byte(reply(t, `{"type":"REAL_ANOMALY","severity":"HIGH","confirms":true,
-			"reason":"The load rose at 14:00 on 12 September and stayed at roughly twice its usual level for 58 hours, and the current rose with it.",
-			"action":"Ask operations whether a load change was intended."}`)))
+			"reason":"El consumo subió a las 14:00 del 12 de septiembre y permaneció el doble de su línea base durante 58 horas; también aumentó la corriente.",
+			"action":"Preguntar a operaciones si el cambio de carga estaba previsto."}`)))
 	})
 
 	narrative, err := narratorFor(s.URL).Narrate(context.Background(), evidence())
@@ -55,7 +55,7 @@ func TestOpenAINarratesAConfirmingModel(t *testing.T) {
 	if narrative.Source != catalog.SourceLLM {
 		t.Errorf("Source = %q, want %q", narrative.Source, catalog.SourceLLM)
 	}
-	if !strings.Contains(narrative.Reason, "58 hours") {
+	if !strings.Contains(narrative.Reason, "58 horas") {
 		t.Errorf("Reason = %q, want the model's own words", narrative.Reason)
 	}
 	if !strings.HasSuffix(narrative.Action, ".") {
@@ -115,8 +115,8 @@ func TestOpenAIStripsMarkupButKeepsTheExplanation(t *testing.T) {
 	// its useful output is worth keeping.
 	s := server(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte(reply(t, `{"type":"REAL_ANOMALY","severity":"HIGH","confirms":true,
-			"reason":"<b>The load</b> rose at 14:00 on 12 September and stayed at twice its usual level for 58 hours.",
-			"action":"Ask operations about it."}`)))
+			"reason":"<b>El consumo</b> subió a las 14:00 del 12 de septiembre y siguió por encima de la línea base durante 58 horas.",
+			"action":"Consultar con operaciones la causa del cambio."}`)))
 	})
 
 	narrative, err := narratorFor(s.URL).Narrate(context.Background(), evidence())
@@ -126,7 +126,7 @@ func TestOpenAIStripsMarkupButKeepsTheExplanation(t *testing.T) {
 	if strings.ContainsAny(narrative.Reason, "<>") {
 		t.Errorf("Reason = %q, want no markup", narrative.Reason)
 	}
-	if !strings.Contains(narrative.Reason, "58 hours") {
+	if !strings.Contains(narrative.Reason, "58 horas") {
 		t.Errorf("Reason = %q, want the explanation kept", narrative.Reason)
 	}
 }
@@ -138,8 +138,8 @@ func TestOpenAISendsTheEpisodeAndNotTheHistory(t *testing.T) {
 			t.Errorf("decode request: %v", err)
 		}
 		w.Write([]byte(reply(t, `{"type":"REAL_ANOMALY","severity":"HIGH","confirms":true,
-			"reason":"The load rose at 14:00 on 12 September and stayed at twice its usual level for 58 hours.",
-			"action":"Ask operations about it."}`)))
+			"reason":"El consumo aumentó a las 14:00 del 12 de septiembre y permaneció por encima de la línea base durante 58 horas.",
+			"action":"Preguntar al equipo de operaciones por el cambio."}`)))
 	})
 
 	if _, err := narratorFor(s.URL).Narrate(context.Background(), evidence()); err != nil {
@@ -154,7 +154,7 @@ func TestOpenAISendsTheEpisodeAndNotTheHistory(t *testing.T) {
 	// The user turn is already a JSON string, so it is compared as one rather
 	// than re-encoded.
 	userTurn, _ := user["content"].(string)
-	for _, want := range []string{`"type":"REAL_ANOMALY"`, `"severity":"HIGH"`, `"hourly_readings"`, `"reported_event"`, `"confidence_terms"`} {
+	for _, want := range []string{`"type":"REAL_ANOMALY"`, `"severity":"HIGH"`, `"hourly_readings"`, `"reported_event"`, `"confidence_terms"`, `"quality_findings"`, `"voltage_v"`, `"current_a"`, `"power_factor"`, `"deviation"`} {
 		if !strings.Contains(userTurn, want) {
 			t.Errorf("the evidence sent omits %s: %s", want, userTurn)
 		}
@@ -163,6 +163,24 @@ func TestOpenAISendsTheEpisodeAndNotTheHistory(t *testing.T) {
 	// ever grows a full series, this is the assertion that catches it.
 	if got := strings.Count(userTurn, `"hour":`); got != 1 {
 		t.Errorf("the payload carries %d readings, want only the episode's own", got)
+	}
+}
+
+func TestOpenAIRejectsEnglishProse(t *testing.T) {
+	for _, content := range []string{
+		`{"type":"REAL_ANOMALY","severity":"HIGH","confirms":true,
+			"reason":"The load rose at 14:00 and stayed at twice its normal level for 58 hours.",
+			"action":"Ask operations about the load."}`,
+		`{"type":"REAL_ANOMALY","severity":"HIGH","confirms":true,
+			"reason":"El consumo subió a las 14:00 y se mantuvo por encima de su línea base durante 58 horas.",
+			"action":"Ask operations about the load."}`,
+	} {
+		s := server(t, func(w http.ResponseWriter, _ *http.Request) {
+			w.Write([]byte(reply(t, content)))
+		})
+		if _, err := narratorFor(s.URL).Narrate(t.Context(), evidence()); err == nil {
+			t.Fatalf("English narration replaced the Spanish rules explanation: %s", content)
+		}
 	}
 }
 

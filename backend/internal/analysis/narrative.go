@@ -35,14 +35,14 @@ func explain(a Anomaly) (reason, action string) {
 
 // window renders the episode's period for prose.
 func window(a Anomaly) string {
-	return fmt.Sprintf("%s to %s",
+	return fmt.Sprintf("del %s al %s",
 		a.WindowStart.Format("2006-01-02 15:04 MST"),
 		a.WindowEnd.Format("2006-01-02 15:04 MST"))
 }
 
 func explainReal(a Anomaly) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Between %s, %s consumed %.2f kWh against an expected %.2f kWh for the same hours, %.1f%% %s its own baseline, across %d hourly readings.",
+	fmt.Fprintf(&b, "En el periodo %s, %s consumió %.2f kWh frente a %.2f kWh esperados para las mismas horas: %.1f%% %s su línea base propia durante %d lecturas horarias.",
 		window(a), a.MeterCode, a.ActualKWh, a.BaselineKWh, abs(a.DeviationPercent), direction(a.DeviationPercent), a.AffectedReadings)
 
 	b.WriteString(" " + corroborationClause(a))
@@ -57,19 +57,19 @@ func explainReal(a Anomaly) string {
 // dismissed.
 func explainExplained(a Anomaly, real bool) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Between %s, %s changed %.1f%% %s its own baseline (%.2f kWh against %.2f kWh expected, %d hourly readings).",
+	fmt.Fprintf(&b, "En el periodo %s, %s cambió %.1f%% %s su línea base propia (%.2f kWh frente a %.2f kWh esperados, %d lecturas horarias).",
 		window(a), a.MeterCode, abs(a.DeviationPercent), direction(a.DeviationPercent),
 		a.ActualKWh, a.BaselineKWh, a.AffectedReadings)
 
 	if event := a.CorrelatedEvent; event != nil {
-		fmt.Fprintf(&b, " The reported event at %s — %q (%s) — falls in this window.",
-			event.Timestamp.Format("2006-01-02 15:04 MST"), event.Description, event.Type)
+		fmt.Fprintf(&b, " El reporte de %s del %s coincide con este periodo.",
+			describeEvent(event.Type), event.Timestamp.Format("2006-01-02 15:04 MST"))
 	} else {
-		b.WriteString(" A reported event falls in this window.")
+		b.WriteString(" Hay un reporte de contexto en este periodo.")
 	}
 
 	if real {
-		b.WriteString(" The change is real and the reported event accounts for it, so it needs confirming rather than escalating.")
+		b.WriteString(" El cambio es real, pero el evento reportado lo explica: conviene confirmarlo antes de escalar.")
 		b.WriteString(" " + corroborationClause(a))
 	} else {
 		// No corroboration clause here, deliberately. Its job everywhere else is
@@ -77,7 +77,7 @@ func explainExplained(a Anomaly, real bool) string {
 		// fault", and during an outage the current falling *is* that fault-free
 		// drop — citing it would argue for a real change the classification has
 		// just said there is no case for.
-		b.WriteString(" A known outage accounts for the whole change, so there is nothing to investigate: the meter was reporting correctly at a lower load, and its current fell with the load rather than contradicting it.")
+		b.WriteString(" La parada programada explica la caída completa; la corriente bajó con la carga y no hay indicios de fallo de medición. No se requiere investigar esta desviación.")
 	}
 	b.WriteString(" " + confidenceClause(a))
 	return b.String()
@@ -85,13 +85,13 @@ func explainExplained(a Anomaly, real bool) string {
 
 func explainDataQuality(a Anomaly) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Between %s, %s reported %.1f%% change in consumption — essentially flat — while %d of its hourly readings were not physically consistent.",
+	fmt.Fprintf(&b, "En el periodo %s, %s registró una variación de consumo de %.1f%%, prácticamente estable, pero %d lecturas horarias presentaron incoherencias físicas.",
 		window(a), a.MeterCode, a.DeviationPercent, a.AffectedReadings)
 
 	if offenders := offendersByVariable(a.Findings); len(offenders) > 0 {
-		b.WriteString(" The offending values were:")
+		b.WriteString(" Los valores incompatibles fueron:")
 		for _, offender := range offenders {
-			fmt.Fprintf(&b, " %s read %.2f against an expected %.2f (%d readings);",
+			fmt.Fprintf(&b, " %s registró %.2f frente a %.2f esperados (%d lecturas);",
 				spellOut(string(offender.variable)), offender.value, offender.expected, offender.count)
 		}
 		// The trailing semicolon reads as a list, so close it into a sentence.
@@ -101,10 +101,10 @@ func explainDataQuality(a Anomaly) string {
 	}
 
 	if event := a.CorrelatedEvent; event != nil {
-		fmt.Fprintf(&b, " This matches the reported event at %s — %q.",
-			event.Timestamp.Format("2006-01-02 15:04 MST"), event.Description)
+		fmt.Fprintf(&b, " El reporte de %s del %s aporta contexto, pero la evidencia procede de las lecturas.",
+			describeEvent(event.Type), event.Timestamp.Format("2006-01-02 15:04 MST"))
 	}
-	b.WriteString(" The consumption it reports over this window cannot be trusted, so the meter and its reporting need checking before the figures are used.")
+	b.WriteString(" Hay que revisar el medidor y su registro antes de usar estas cifras de consumo.")
 	b.WriteString(" " + confidenceClause(a))
 	return b.String()
 }
@@ -169,12 +169,12 @@ func corroborationClause(a Anomaly) string {
 		others = append(others, spellOut(name))
 	}
 	if len(a.Corroborating) == 0 {
-		return "Nothing else moved with it, so the change is visible in consumption alone."
+		return "Ninguna otra variable acompañó el cambio; solo se observa en el consumo."
 	}
 	if len(others) == 0 {
-		return "Only consumption moved; the meter's electrical values did not follow it."
+		return "Solo cambió el consumo; las variables eléctricas no lo acompañaron."
 	}
-	return capitalise(fmt.Sprintf("%s moved with it, which is what a real change in load looks like rather than a reporting fault.",
+	return capitalise(fmt.Sprintf("También cambiaron %s; esta corroboración es compatible con un cambio real de carga y no solo con un fallo del reporte.",
 		joinWithAnd(others)))
 }
 
@@ -182,13 +182,13 @@ func corroborationClause(a Anomaly) string {
 func spellOut(name string) string {
 	switch name {
 	case "power_factor":
-		return "power factor"
+		return "el factor de potencia"
 	case "energy_balance":
-		return "the energy balance"
+		return "el balance energético"
 	case "current":
-		return "current"
+		return "la corriente"
 	case "voltage":
-		return "voltage"
+		return "el voltaje"
 	default:
 		return strings.ReplaceAll(name, "_", " ")
 	}
@@ -197,19 +197,18 @@ func spellOut(name string) string {
 func eventClause(a Anomaly) string {
 	switch {
 	case a.CorrelatedEvent == nil:
-		return "No operational event was reported for this meter in this window, so nothing on record accounts for the change."
+		return "No se registró ningún evento operativo para este medidor en el periodo; ningún reporte explica el cambio."
 	case a.CorrelatedEvent.Explains:
-		return fmt.Sprintf("The reported event %q is consistent with the change, though it does not by itself establish the cause.",
-			a.CorrelatedEvent.Description)
+		return "El evento reportado es coherente con la desviación, aunque por sí solo no demuestra la causa."
 	case a.CorrelatedEvent.Type == string(catalog.EventTypeUnknown):
-		return "Somebody looked and reported no operational event, which is positive evidence that nothing on record accounts for the change."
+		return "Se informó explícitamente que no hubo evento operativo; ningún evento conocido explica la desviación."
 	default:
-		return fmt.Sprintf("The reported event %q is not the cause.", a.CorrelatedEvent.Description)
+		return "El evento reportado no explica la desviación."
 	}
 }
 
 func confidenceClause(a Anomaly) string {
-	return fmt.Sprintf("Confidence %.2f, from deviation %.2f, event match %.2f, corroboration %.2f and persistence %.2f — an evidence score, not a probability.",
+	return fmt.Sprintf("Confianza %.2f: desviación %.2f, coincidencia de evento %.2f, corroboración %.2f y persistencia %.2f; es una puntuación de evidencia, no una probabilidad.",
 		a.Confidence, a.ConfidenceBasis.Deviation, a.ConfidenceBasis.EventMatch,
 		a.ConfidenceBasis.Corroboration, a.ConfidenceBasis.Persistence)
 }
@@ -219,13 +218,13 @@ func confidenceClause(a Anomaly) string {
 func escalate(a Anomaly) string {
 	switch a.Type {
 	case AnomalyDataQuality:
-		return "Check the meter and its reporting before using these consumption figures: ask the metering team to verify the installation and pull the raw register for this window."
+		return "Solicitar al equipo de medición la revisión del medidor y el registro original de este periodo antes de utilizar las cifras de consumo."
 	case AnomalyFalsePositive:
-		return "No escalar: nothing needs to be done. The scheduled outage accounts for this window, and it is recorded so that the drop is visibly examined rather than silently missing."
+		return "No escalar. Registrar la parada programada como explicación de la caída y conservar el episodio examinado."
 	case AnomalyExplainable:
-		return "Confirm with the operations team that the reported change is the whole story, then acknowledge and close it. Escalate only if the confirmed change does not match the reported one."
+		return "Confirmar con operaciones que el cambio reportado explica todo el periodo. Escalar solo si las lecturas no coinciden con la operación confirmada."
 	default:
-		return "Investigate: confirm with the operations team whether a load change was intended, and if none was, check for unmetered or faulty equipment drawing the additional load."
+		return "Investigar con operaciones si el aumento de carga estaba previsto; de no ser así, revisar equipos defectuosos o consumos no medidos."
 	}
 }
 
@@ -240,9 +239,9 @@ func capitalise(text string) string {
 
 func direction(deviation float64) string {
 	if deviation >= 0 {
-		return "above"
+		return "por encima de"
 	}
-	return "below"
+	return "por debajo de"
 }
 
 func joinWithAnd(values []string) string {
@@ -252,8 +251,23 @@ func joinWithAnd(values []string) string {
 	case 1:
 		return values[0]
 	case 2:
-		return values[0] + " and " + values[1]
+		return values[0] + " y " + values[1]
 	default:
-		return strings.Join(values[:len(values)-1], ", ") + " and " + values[len(values)-1]
+		return strings.Join(values[:len(values)-1], ", ") + " y " + values[len(values)-1]
+	}
+}
+
+func describeEvent(kind string) string {
+	switch kind {
+	case "SCHEDULED_OUTAGE":
+		return "parada programada"
+	case "OPERATIONAL_CHANGE":
+		return "cambio de producción"
+	case "DATA_QUALITY":
+		return "calidad de datos"
+	case "UNKNOWN":
+		return "ausencia de evento"
+	default:
+		return "contexto operativo"
 	}
 }

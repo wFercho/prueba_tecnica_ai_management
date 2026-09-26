@@ -368,6 +368,22 @@ func (db *DB) LatestRun(ctx context.Context) (store.Run, error) {
 	return run, nil
 }
 
+func (db *DB) LatestCompletedRun(ctx context.Context) (store.Run, error) {
+	var run store.Run
+	err := db.pool.QueryRow(ctx, `
+		SELECT id, started_at, finished_at, state, anomaly_count, window_start, window_end, error
+		FROM analysis_runs WHERE state = 'COMPLETED' ORDER BY id DESC LIMIT 1`).
+		Scan(&run.ID, &run.StartedAt, &run.FinishedAt, &run.State, &run.AnomalyCount,
+			&run.WindowStart, &run.WindowEnd, &run.Error)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return store.Run{}, store.ErrNotFound
+	}
+	if err != nil {
+		return store.Run{}, fmt.Errorf("latest completed run: %w", err)
+	}
+	return run, nil
+}
+
 // SaveAnomalies writes a run's anomalies in one transaction. A run whose
 // anomalies are only partly persisted is a run the dashboard cannot trust, and a
 // half-written anomaly list is worse than none: the count on the run would not
@@ -405,6 +421,10 @@ func (db *DB) SaveAnomalies(ctx context.Context, runID int64, anomalies []analys
 			corroborating = []string{}
 		}
 
+		explanationStatus := anomaly.ExplanationStatus
+		if explanationStatus == "" {
+			explanationStatus = store.ExplanationPending
+		}
 		_, err = tx.Exec(ctx, `
 			INSERT INTO anomalies (
 				run_id, meter_id, window_start, window_end, affected_reading_count,
@@ -417,7 +437,7 @@ func (db *DB) SaveAnomalies(ctx context.Context, runID int64, anomalies []analys
 			anomaly.Type, anomaly.Severity, anomaly.Confidence, basis, anomaly.DeviationPercent,
 			anomaly.ActualKWh, anomaly.BaselineKWh, corroborating, findings, series,
 			correlatedEvent, anomaly.Reason, anomaly.RecommendedAction, anomaly.DetectedBy,
-			store.SourceRules, store.ExplanationPending)
+			store.SourceRules, explanationStatus)
 		if err != nil {
 			var pgErr *pgconn.PgError
 			if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -467,17 +487,6 @@ func (db *DB) setProse(ctx context.Context, anomalyID int64, source, status, rea
 	return nil
 }
 
-func (db *DB) SetStatus(ctx context.Context, anomalyID int64, status store.AnomalyStatus) error {
-	tag, err := db.pool.Exec(ctx, `UPDATE anomalies SET status = $2 WHERE id = $1`, anomalyID, status)
-	if err != nil {
-		return fmt.Errorf("set status for %d: %w", anomalyID, err)
-	}
-	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("anomaly %d: %w", anomalyID, store.ErrNotFound)
-	}
-	return nil
-}
-
 // severityRank and typeRank order the anomalies table the way an operator reads
 // it: worst first, and within a severity, the most evident first. It is a fixed
 // ranking in SQL rather than a computed mean of the confidence band, because an
@@ -502,10 +511,18 @@ const anomalyColumns = `
 	recommended_action, detected_by, explanation_source, explanation_status, status`
 
 func (db *DB) Anomalies(ctx context.Context) ([]analysis.Anomaly, error) {
-	rows, err := db.pool.Query(ctx, `
+	return db.queryAnomalies(ctx, `
 		SELECT `+anomalyColumns+`
 		FROM anomalies
-		WHERE run_id = (SELECT id FROM analysis_runs ORDER BY id DESC LIMIT 1)`+anomalyOrder)
+		WHERE run_id = (SELECT id FROM analysis_runs WHERE state = 'COMPLETED' ORDER BY id DESC LIMIT 1)`+anomalyOrder)
+}
+
+func (db *DB) RunAnomalies(ctx context.Context, runID int64) ([]analysis.Anomaly, error) {
+	return db.queryAnomalies(ctx, `SELECT `+anomalyColumns+` FROM anomalies WHERE run_id = $1 `+anomalyOrder, runID)
+}
+
+func (db *DB) queryAnomalies(ctx context.Context, query string, args ...any) ([]analysis.Anomaly, error) {
+	rows, err := db.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list anomalies: %w", err)
 	}
@@ -560,6 +577,8 @@ func scanAnomaly(rows pgx.Rows) (analysis.Anomaly, error) {
 	}
 
 	anomaly.MeterCode = meterID
+	anomaly.Anomaly = true
+	anomaly.ConfidenceBand = analysis.Band(anomaly.Confidence)
 	anomaly.Corroborating = corroborating
 	anomaly.ExplanationSource = explanationSource
 	anomaly.ExplanationStatus = explanationStatus

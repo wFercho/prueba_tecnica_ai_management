@@ -14,7 +14,7 @@ export default defineConfig({
     // rewrite, which is what lets the frontend call `/meters` in development and in
     // production alike — one set of relative paths, no environment branch, and no CORS.
     proxy: Object.fromEntries(
-      ['/meters', '/anomalies', '/ai', '/dashboard'].map((route) => [
+      ['/meters', '/anomalies', '/ai', '/dashboard', '/auth', '/health'].map((route) => [
         route,
         {
           target: apiTarget,

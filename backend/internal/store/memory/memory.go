@@ -30,6 +30,8 @@ type Store struct {
 	runs         []store.Run
 	anomaly      map[int64]analysis.Anomaly
 	anomalyOrder []int64
+	users        map[string]store.User
+	sessions     map[string]session
 	nextID       int64
 	// Fails makes every write fail, so callers can be tested against a database
 	// that is unavailable.
@@ -54,21 +56,43 @@ func (s *Store) fail() error {
 // Seed replaces the catalogue, readings and events in one call, which is what
 // the importer does and what tests do in setup.
 func (s *Store) Seed(meters []catalog.Meter, readings []catalog.Reading, events []catalog.OperationalEvent) error {
+	return s.ReplaceDataset(context.Background(), meters, readings, events)
+}
+
+func (s *Store) ReplaceDataset(ctx context.Context, meters []catalog.Meter, readings []catalog.Reading, events []catalog.OperationalEvent) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.fail(); err != nil {
 		return err
 	}
-	s.meters = map[string]catalog.Meter{}
-	s.order = nil
-	for _, meter := range meters {
-		if _, seen := s.meters[string(meter.Code)]; !seen {
-			s.order = append(s.order, string(meter.Code))
-		}
-		s.meters[string(meter.Code)] = meter
+	if err := ctx.Err(); err != nil {
+		return err
 	}
+	staged := make(map[string]catalog.Meter, len(meters))
+	var order []string
+	for _, meter := range meters {
+		if _, seen := staged[string(meter.Code)]; !seen {
+			order = append(order, string(meter.Code))
+		}
+		staged[string(meter.Code)] = meter
+	}
+	for _, reading := range readings {
+		if _, known := staged[string(reading.MeterCode)]; !known {
+			return fmt.Errorf("reading for unknown meter %s: %w", reading.MeterCode, store.ErrNotFound)
+		}
+	}
+	for _, event := range events {
+		if _, known := staged[string(event.MeterCode)]; !known {
+			return fmt.Errorf("event for unknown meter %s: %w", event.MeterCode, store.ErrNotFound)
+		}
+	}
+	s.meters = staged
+	s.order = order
 	s.readings = append([]catalog.Reading(nil), readings...)
 	s.events = append([]catalog.OperationalEvent(nil), events...)
+	s.runs = nil
+	s.anomaly = map[int64]analysis.Anomaly{}
+	s.anomalyOrder = nil
 	return nil
 }
 
@@ -311,6 +335,20 @@ func (s *Store) LatestRun(context.Context) (store.Run, error) {
 	return s.runs[len(s.runs)-1], nil
 }
 
+func (s *Store) LatestCompletedRun(context.Context) (store.Run, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if err := s.fail(); err != nil {
+		return store.Run{}, err
+	}
+	for i := len(s.runs) - 1; i >= 0; i-- {
+		if s.runs[i].State == store.RunCompleted {
+			return s.runs[i], nil
+		}
+	}
+	return store.Run{}, store.ErrNotFound
+}
+
 // Run returns one run, for the run-state endpoint.
 func (s *Store) Run(_ context.Context, runID int64) (store.Run, error) {
 	s.mu.RLock()
@@ -339,6 +377,7 @@ func (s *Store) SaveAnomalies(_ context.Context, runID int64, anomalies []analys
 		}
 		s.nextID++
 		anomaly.ID = s.nextID
+		anomaly.Anomaly = true
 		anomaly.RunID = runID
 		if anomaly.ExplanationSource == "" {
 			anomaly.ExplanationSource = catalog.SourceRules
@@ -392,40 +431,34 @@ func (s *Store) MarkNarrationFailed(_ context.Context, anomalyID int64) error {
 	return nil
 }
 
-func (s *Store) SetStatus(_ context.Context, anomalyID int64, status store.AnomalyStatus) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if err := s.fail(); err != nil {
-		return err
-	}
-	anomaly, ok := s.anomaly[anomalyID]
-	if !ok {
-		return fmt.Errorf("anomaly %d: %w", anomalyID, store.ErrNotFound)
-	}
-	anomaly.Status = status
-	s.anomaly[anomalyID] = anomaly
-	return nil
-}
-
 func (s *Store) Anomalies(ctx context.Context) ([]analysis.Anomaly, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if err := s.fail(); err != nil {
 		return nil, err
 	}
-	return s.anomaliesOfLatestRunLocked(), nil
+	for i := len(s.runs) - 1; i >= 0; i-- {
+		if s.runs[i].State == store.RunCompleted {
+			return s.anomaliesOfRunLocked(s.runs[i].ID), nil
+		}
+	}
+	return nil, nil
 }
 
-// anomaliesOfLatestRunLocked returns the latest run's anomalies in the order an
-// operator reads them.
-func (s *Store) anomaliesOfLatestRunLocked() []analysis.Anomaly {
-	if len(s.runs) == 0 {
-		return nil
+func (s *Store) RunAnomalies(_ context.Context, runID int64) ([]analysis.Anomaly, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if err := s.fail(); err != nil {
+		return nil, err
 	}
-	latest := s.runs[len(s.runs)-1].ID
+	return s.anomaliesOfRunLocked(runID), nil
+}
+
+// anomaliesOfRunLocked returns one run's anomalies in operator reading order.
+func (s *Store) anomaliesOfRunLocked(runID int64) []analysis.Anomaly {
 	var out []analysis.Anomaly
 	for _, id := range s.anomalyOrder {
-		if anomaly, ok := s.anomaly[id]; ok && anomaly.RunID == latest {
+		if anomaly, ok := s.anomaly[id]; ok && anomaly.RunID == runID {
 			out = append(out, anomaly)
 		}
 	}

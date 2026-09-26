@@ -43,26 +43,18 @@ const defaultTimeout = 20 * time.Second
 
 // prompt is the system instruction. It states the constraint the code enforces,
 // because a model told nothing will eventually try to reclassify a finding.
-const prompt = `You explain energy anomalies to an operations engineer.
-
-You are given a finding that a deterministic detector has already made. Your job
-is to explain it in plain language, not to judge it.
-
-Rules you must follow:
-- You may not change the type or the severity. They are given to you and are final.
-- Use only the evidence provided. Every number you state must come from the
-  evidence; do not estimate, extrapolate or add context you were not given.
-- If the evidence does not identify a cause, say that nothing on record accounts
-  for the change. Do not speculate about what probably caused it.
-- Name the hour the change began and how long it lasted, taken from the series.
-- Write in plain sentences. No bullet points, no headings, no markdown.
-- The reason must be at least one full sentence and end with a full stop. The
-  recommended action must be one instruction, naming who should do what, and end
-  with a full stop.
-
-Reply with JSON only, matching this shape:
-{"type": "<type from the evidence>", "severity": "<severity from the evidence>",
- "confirms": true, "reason": "<explanation>", "action": "<recommended action>"}`
+const prompt = `Explica episodios de consumo eléctrico a una persona de operaciones.
+Un detector determinista ya ha decidido el tipo, severidad y confianza. No los cambies.
+Redacta la explicación y acción recomendada SIEMPRE en español, incluso si un
+reporte original de contexto está en inglés. No copies frases inglesas de la fuente.
+Usa solo los datos proporcionados; cita la hora de inicio, la duración, el consumo,
+la línea base, las variables eléctricas pertinentes y los reportes. No inventes
+causas, cifras ni eventos. Si no hay evento explicativo, dilo explícitamente.
+Una oración completa para la explicación y una instrucción concreta para la
+acción. Ambas terminan en punto. Sin listas, encabezados ni formato Markdown.
+Responde solo con JSON de esta forma:
+{"type":"<tipo recibido>","severity":"<severidad recibida>",
+"confirms":true,"reason":"<explicación en español>","action":"<acción en español>"}`
 
 // Narrate calls the API and returns its prose, if the model both confirms the
 // finding and produces something worth persisting.
@@ -140,9 +132,13 @@ func (o OpenAI) request(evidence Evidence) ([]byte, error) {
 	points := make([]map[string]any, 0, len(evidence.Series))
 	for _, point := range evidence.Series {
 		points = append(points, map[string]any{
-			"hour":     point.Timestamp.Format(time.RFC3339),
-			"actual":   point.ActualKWh,
-			"baseline": point.BaselineKWh,
+			"hour":         point.Timestamp.Format(time.RFC3339),
+			"actual":       point.ActualKWh,
+			"baseline":     point.BaselineKWh,
+			"deviation":    point.Deviation,
+			"voltage_v":    point.VoltageV,
+			"current_a":    point.CurrentA,
+			"power_factor": point.PowerFactor,
 		})
 	}
 
@@ -165,10 +161,11 @@ func (o OpenAI) request(evidence Evidence) ([]byte, error) {
 			"corroboration": anomaly.ConfidenceBasis.Corroboration,
 			"persistence":   anomaly.ConfidenceBasis.Persistence,
 		},
-		"corroborating":   anomaly.Corroborating,
-		"reported_event":  correlation,
-		"hourly_readings": points,
-		"detector_said":   anomaly.Reason,
+		"corroborating":    anomaly.Corroborating,
+		"reported_event":   correlation,
+		"hourly_readings":  points,
+		"quality_findings": anomaly.Findings,
+		"detector_said":    anomaly.Reason,
 	}
 
 	userPayload, err := json.Marshal(userEvidence)
@@ -217,11 +214,30 @@ func (o OpenAI) parse(body io.Reader, evidence Evidence) (Narrative, error) {
 	if err := validate(verdict, evidence.Anomaly); err != nil {
 		return Narrative{}, err
 	}
+	if !IsSpanishProse(verdict.Reason) || !IsSpanishProse(verdict.Action) {
+		return Narrative{}, fmt.Errorf("narrate: the model did not provide a Spanish explanation")
+	}
 	return sanitise(Narrative{
 		Reason: verdict.Reason,
 		Action: verdict.Action,
 		Source: catalog.SourceLLM,
 	})
+}
+
+// IsSpanishProse is a conservative guard for obviously English replies, not a
+// language detector. A rejected rewrite leaves the Spanish rules prose intact.
+func IsSpanishProse(text string) bool {
+	common := map[string]bool{"el": true, "la": true, "los": true, "las": true, "del": true,
+		"de": true, "en": true, "con": true, "para": true, "por": true, "una": true,
+		"que": true, "se": true, "su": true, "entre": true, "sin": true}
+	count := 0
+	for _, word := range strings.Fields(strings.ToLower(text)) {
+		word = strings.Trim(word, `.,;:!¿?¡"'()[]`)
+		if common[word] {
+			count++
+		}
+	}
+	return count >= 2
 }
 
 // decodeVerdict reads the model's JSON answer, tolerating a fence around it,

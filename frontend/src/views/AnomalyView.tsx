@@ -1,6 +1,6 @@
 import { Link } from '@tanstack/react-router'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, type AnomalyStatus } from '../api'
+import { useQuery } from '@tanstack/react-query'
+import { api } from '../api'
 import { ConsumptionChart } from '../components/ConsumptionChart'
 import {
   ConfidenceBadge,
@@ -10,29 +10,21 @@ import {
 } from '../components/badges'
 import { formatDateTime, formatKWh, formatNumber, formatPercent } from '../components/format'
 
-const NEXT_STATUSES: { status: AnomalyStatus; label: string }[] = [
-  { status: 'ACKNOWLEDGED', label: 'Reconocer' },
-  { status: 'RESOLVED', label: 'Marcar como resuelta' },
-  { status: 'DISMISSED', label: 'Descartar' },
-]
+const variableLabel: Record<string, string> = {
+  voltage: 'voltaje (V)', current: 'corriente (A)', power_factor: 'factor de potencia', energy_balance: 'balance energético',
+}
+
+const eventLabel: Record<string, string> = {
+  OPERATIONAL_CHANGE: 'Cambio operativo', SCHEDULED_OUTAGE: 'Parada programada',
+  DATA_QUALITY: 'Reporte de calidad', UNKNOWN: 'Sin evento operativo reportado',
+}
 
 export function AnomalyView({ anomalyId }: { anomalyId: number }) {
-  const queryClient = useQueryClient()
   const anomalyQuery = useQuery({
     queryKey: ['anomaly', anomalyId],
     queryFn: () => api.anomaly(anomalyId),
     enabled: Number.isSafeInteger(anomalyId) && anomalyId > 0,
-  })
-  const change = useMutation({
-    mutationFn: (status: AnomalyStatus) => api.setStatus(anomalyId, status),
-    onSuccess: async () => {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['anomaly', anomalyId] }),
-        queryClient.invalidateQueries({ queryKey: ['summary'] }),
-        queryClient.invalidateQueries({ queryKey: ['anomalies'] }),
-        queryClient.invalidateQueries({ queryKey: ['meter'] }),
-      ])
-    },
+    refetchInterval: (query) => query.state.data?.anomaly.explanation_status === 'PENDING' ? 1200 : false,
   })
 
   if (!Number.isSafeInteger(anomalyId) || anomalyId <= 0) return <p className="notice error" role="alert">El identificador del hallazgo no es válido.</p>
@@ -68,7 +60,7 @@ export function AnomalyView({ anomalyId }: { anomalyId: number }) {
                 inAnomaly: true,
               }))}
               height={200}
-              label="Lecturas horarias del episodio frente al baseline"
+              label="Lecturas horarias del episodio frente a la línea base"
             />
           ) : (
             <p className="empty">No hay lecturas horarias para este hallazgo.</p>
@@ -96,27 +88,6 @@ export function AnomalyView({ anomalyId }: { anomalyId: number }) {
           </p>
         </div>
 
-        {change.isError && <p className="notice error" role="alert">No se pudo guardar la decisión.</p>}
-
-        <div className="card">
-          <h2>Decisión</h2>
-          <p className="muted" style={{ marginTop: 0 }}>
-            Esta decisión pertenece al operador; el detector no la modifica.
-          </p>
-          <div className="actions">
-            {NEXT_STATUSES.map((next) => (
-              <button
-                key={next.status}
-                type="button"
-                className="action"
-                disabled={change.isPending || anomaly.status === next.status}
-                onClick={() => change.mutate(next.status)}
-              >
-                {next.label}
-              </button>
-            ))}
-          </div>
-        </div>
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -137,7 +108,7 @@ export function AnomalyView({ anomalyId }: { anomalyId: number }) {
             <dt>Baseline</dt>
             <dd>{formatKWh(anomaly.baseline_kwh)}</dd>
             <dt>Desviación</dt>
-            <dd>{formatPercent(anomaly.deviation_percent * 100)}</dd>
+            <dd>{formatPercent(anomaly.deviation_percent)}</dd>
             <dt>Lecturas afectadas</dt>
             <dd>{anomaly.affected_readings}</dd>
             <dt>Regla</dt>
@@ -172,7 +143,7 @@ export function AnomalyView({ anomalyId }: { anomalyId: number }) {
               {basis.persistence.toFixed(2)} <span className="muted">× 0.15</span>
             </dd>
             <dt>Puntuación</dt>
-            <dd>{formatNumber(anomaly.confidence, 2)} · {anomaly.confidence_band}</dd>
+            <dd>{formatNumber(anomaly.confidence, 2)} · <ConfidenceBadge band={anomaly.confidence_band} confidence={anomaly.confidence} /></dd>
           </dl>
         </div>
 
@@ -197,16 +168,24 @@ export function AnomalyView({ anomalyId }: { anomalyId: number }) {
             <>
               <p className="prose">
                 <span className="prose-label">
-                  {anomaly.correlated_event.type} ·{' '}
+                  {eventLabel[anomaly.correlated_event.type] ?? 'Reporte de contexto'} ·{' '}
                   {formatDateTime(anomaly.correlated_event.timestamp)}
                 </span>
-                {anomaly.correlated_event.description}
+                {anomaly.correlated_event.type === 'UNKNOWN'
+                  ? 'No se comunicó ningún evento que explique el cambio.'
+                  : 'Este reporte aporta contexto al episodio.'}
               </p>
-              <p className="muted" style={{ marginBottom: 0 }}>
+              <p className="muted" style={{ marginBottom: anomaly.correlated_event.description ? 8 : 0 }}>
                 {anomaly.correlated_event.explains
                   ? 'Este evento explica la desviación.'
                   : 'Ningún reporte explica esta desviación.'}
               </p>
+              {anomaly.correlated_event.description && (
+                <p className="muted" style={{ marginBottom: 0 }}>
+                  Texto original del reporte (fuente, sin traducir):{' '}
+                  <span lang="en">“{anomaly.correlated_event.description}”</span>
+                </p>
+              )}
             </>
           ) : (
             <p className="empty">No hay reportes en este periodo.</p>
@@ -219,9 +198,9 @@ export function AnomalyView({ anomalyId }: { anomalyId: number }) {
             <table>
               <tbody>
                 {anomaly.findings.map((finding) => (
-                  <tr key={finding.code}>
-                    <td className="mono">{finding.code}</td>
-                    <td>{finding.description}</td>
+                  <tr key={`${finding.timestamp}-${finding.variable}`}>
+                    <td className="mono">{formatDateTime(finding.timestamp)}</td>
+                    <td>{variableLabel[finding.variable] ?? finding.variable}: {formatNumber(finding.value, 2)} frente a {formatNumber(finding.expected, 2)} esperados</td>
                   </tr>
                 ))}
               </tbody>

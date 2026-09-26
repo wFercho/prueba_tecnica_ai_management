@@ -4,7 +4,7 @@
 
 **Blocked by:** 02 — Iniciar sesión con una cuenta de demo persistida.
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [ ] El menú de usuario presenta «Cerrar sesión» en español y la acción revoca la sesión almacenada, no solo oculta la vista.
 - [ ] La cookie anterior deja de autorizar cualquier consulta protegida; recargar o usar Atrás no restablece una sesión revocada.
