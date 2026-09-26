@@ -10,17 +10,30 @@ veredicto ni bloquear la demostración sin API key.
 Necesitas Docker y `make`. No hace falta instalar Go, Node ni PostgreSQL en el host.
 
 ```sh
+make demo     # vía rápida: levanta la pila e importa los CSV sintéticos
+```
+
+Equivale a ejecutar los dos pasos por separado, que siguen disponibles como
+control fino:
+
+```sh
 make up       # compila y arranca PostgreSQL, API e interfaz en http://localhost:8090
 make seed     # importa los CSV sintéticos; reinicia runs y hallazgos previos
 ```
+
+Ninguna de las dos vías lanza el análisis: la demo debe mostrar el primer
+análisis ocurriendo en la interfaz.
 
 1. Abre <http://localhost:8090> e inicia sesión con **`admin@email.com` / `admin`**.
    Son credenciales **conocidas de demo local**, nunca aptas para exponer en Internet.
 2. En el panel, antes del primer análisis, observa «Pendiente de análisis» y salud
    «Sin analizar». Entra a M-109 por su enlace: hay 336 lecturas y línea base, pero
    **ninguna banda ni clasificación precalculada**. Recarga la ruta directa si quieres.
-3. Regresa al panel y pulsa «Ejecutar análisis IA» (o `make analyze`, que inicia sesión con la cuenta demo). La API devuelve `202` solo después
-   de guardar las cuatro explicaciones y acciones por reglas en español.
+3. Regresa al panel y pulsa «Ejecutar análisis IA». La API devuelve `202` solo después
+   de guardar las cuatro explicaciones y acciones por reglas en español. El botón
+   es la vía principal de la demo; `make analyze` invoca la misma ruta
+   (`POST /ai/analyze`, iniciando sesión con la cuenta demo) para lanzar esa
+   misma lógica desde la terminal.
 4. Investiga los cuatro episodios: M-109 (`REAL_ANOMALY/HIGH`, 58 horas), M-112
    (`DATA_QUALITY/HIGH`, 16 lecturas intermitentes), M-104 (`EXPLAINABLE/MEDIUM`)
    y M-106 (`FALSE_POSITIVE/LOW`, «No escalar»). Los otros ocho medidores no generan
@@ -49,6 +62,46 @@ ubicaciones de medidores son **metadatos sintéticos**, no mediciones del CSV.
 - `frontend`: React, TanStack Router/Query/Table, Tailwind CSS y Recharts. El gráfico
   distingue línea de consumo, línea base discontinua y banda del episodio; también
   ofrece una tabla de lecturas accesible.
+
+### Diagramas
+
+```mermaid
+flowchart LR
+    browser["Navegador\n(dashboard)"] --> api["API Go\n+ dashboard compilado"]
+    api --> db[("PostgreSQL")]
+    seed["seed\n(importación)"] --> db
+    provision["provision\n(cuentas)"] --> db
+```
+
+El navegador habla con un solo origen: la API sirve los datos y el dashboard
+compilado. `seed` y `provision` son jobs de un solo uso contra la misma base;
+las utilidades de pruebas quedan fuera por no ser runtime.
+
+```mermaid
+sequenceDiagram
+    actor E as Evaluador
+    participant T as Terminal/Compose
+    participant N as Navegador
+    participant A as API
+    participant D as PostgreSQL
+    E->>T: make demo (up + seed)
+    T->>A: arranque y migración
+    A->>D: provisiona demo solo si no existe
+    T->>D: job seed importa lecturas y reportes (sin runs)
+    E->>N: login demo
+    N->>A: POST /auth/login
+    A->>D: verifica hash y crea sesión
+    E->>N: «Ejecutar análisis IA»
+    N->>A: POST /ai/analyze
+    A->>D: persiste 4 episodios con prosa por reglas
+    A-->>N: 202 con el run
+    N->>A: GET /ai/analysis/{id} (polling)
+    A->>D: narración opcional por fila
+    E->>N: investiga y lee la acción recomendada
+    E->>N: cerrar sesión
+    N->>A: POST /auth/logout
+    A->>D: revoca la sesión
+```
 
 La confianza es una puntuación de evidencia en `[0,1]`, no probabilidad de avería.
 Se muestran las cuatro bases del score (`deviation`, `event_match`, `corroboration`,

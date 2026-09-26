@@ -1,6 +1,7 @@
 # The Docker way is the default way. Every target below that runs Go or Node runs it
 # in a container, so a clean checkout needs only Docker.
 #
+#   make demo      levanta la pila e importa los datos, sin analizar
 #   make up        database and API
 #   make seed      import the delivered CSVs
 #   make analyze   run the detector
@@ -11,7 +12,7 @@
 COMPOSE := docker compose
 
 .DEFAULT_GOAL := help
-.PHONY: help up down build rebuild logs seed analyze test test-race test-sql vet fmt \
+.PHONY: help demo up down build rebuild logs seed analyze test test-race test-sql vet fmt \
         psql shell fresh db-only test-db smoke clean nuke
 
 help: ## Show this help
@@ -19,6 +20,10 @@ help: ## Show this help
 		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
 
 # ---------- the stack ----------
+
+demo: ## Levanta la pila e importa los datos, sin lanzar el análisis
+	@$(MAKE) up
+	@$(MAKE) seed
 
 up: ## Build and start the database and the API, and wait for both to be healthy
 	$(COMPOSE) up -d --build --wait

@@ -113,7 +113,7 @@ export function Dashboard() {
       )}
 
       <div className="grid items-start gap-4 md:grid-cols-2">
-        <div className="card">
+        <div className="card mb-4">
           <h2><Play size={14} aria-hidden="true" /> Análisis</h2>
             <button
               type="button"
@@ -143,7 +143,7 @@ export function Dashboard() {
           </div>
 
           {lastRun && (
-            <div className="card">
+            <div className="card mb-4">
               <h2><Activity size={14} aria-hidden="true" /> Último análisis</h2>
               <dl className="facts">
                 <dt>Estado</dt>
@@ -161,7 +161,7 @@ export function Dashboard() {
           )}
       </div>
 
-      <div className="card">
+      <div className="card mb-4">
         <h2><LayoutList size={14} aria-hidden="true" /> Hallazgos, por urgencia</h2>
         {anomalies.length === 0 ? (
           <p className="empty">
