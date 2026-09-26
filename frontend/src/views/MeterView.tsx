@@ -1,5 +1,6 @@
 import { Link } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
+import { useState } from 'react'
 import { api } from '../api'
 import { ConsumptionChart } from '../components/ConsumptionChart'
 import {
@@ -8,9 +9,16 @@ import {
   StatusBadge,
   TypeBadge,
 } from '../components/badges'
+import { DateRangeFilter } from '../components/DateRangeFilter'
+import { rangeBounds } from '../components/dateRange'
+import { PaginationControls } from '../components/PaginationControls'
 import { formatDateTime, formatKWh, formatPercent } from '../components/format'
 
 export function MeterView({ meterId }: { meterId: string }) {
+  const [from, setFrom] = useState('')
+  const [to, setTo] = useState('')
+  const [page, setPage] = useState(0)
+  const pageSize = 24
   const detailQuery = useQuery({
     queryKey: ['meter', meterId],
     queryFn: () => api.meter(meterId),
@@ -33,6 +41,19 @@ export function MeterView({ meterId }: { meterId: string }) {
 
   const detail = detailQuery.data
   const { meter, points, baseline, anomalies, events, health, total_kwh } = detail
+  const { start: fromMs, end: toMs } = rangeBounds(from, to)
+  const tablePoints = points.filter((point) => {
+    const at = new Date(point.timestamp).getTime()
+    return at >= fromMs && at <= toMs
+  })
+  const pages = Math.ceil(tablePoints.length / pageSize)
+  const pageRows = tablePoints.slice(page * pageSize, page * pageSize + pageSize)
+  function changeRange(setter: (value: string) => void) {
+    return (value: string) => {
+      setter(value)
+      setPage(0)
+    }
+  }
   const baselineTotal = points.every((point) => point.baseline_available)
     ? points.reduce((total, point) => total + point.baseline_kwh, 0) : null
   const latest = points.at(-1)
@@ -158,9 +179,15 @@ export function MeterView({ meterId }: { meterId: string }) {
       <div className="card mt-4">
         <h2>Variables eléctricas horarias</h2>
         <p className="muted">El estado de origen no sustituye el veredicto de calidad: las lecturas afectadas se identifican aparte.</p>
+        <DateRangeFilter prefix="variables" from={from} to={to}
+          onFromChange={changeRange(setFrom)} onToChange={changeRange(setTo)}
+          onClear={() => { setFrom(''); setTo(''); setPage(0) }} />
+        {tablePoints.length === 0 ? (
+          <p className="empty">No hay lecturas en el rango elegido.</p>
+        ) : (
         <div className="max-h-96 overflow-auto">
           <table><thead><tr><th>Hora UTC</th><th>Voltaje (V)</th><th>Corriente (A)</th><th>Factor de potencia</th><th>Estado de origen</th><th>Evidencia</th></tr></thead>
-            <tbody>{points.map((point) => <tr key={point.timestamp}>
+            <tbody>{pageRows.map((point) => <tr key={point.timestamp}>
               <td>{formatDateTime(point.timestamp)}</td>
               <td>{point.voltage_v?.toFixed(2)}</td>
               <td>{point.current_a?.toFixed(2)}</td><td>{point.power_factor?.toFixed(3)}</td>
@@ -168,6 +195,15 @@ export function MeterView({ meterId }: { meterId: string }) {
             </tr>)}</tbody>
           </table>
         </div>
+        )}
+        <PaginationControls
+          page={Math.min(page, Math.max(pages - 1, 0))}
+          pages={pages}
+          total={tablePoints.length}
+          unit="lecturas"
+          onPrevious={() => setPage((current) => Math.max(current - 1, 0))}
+          onNext={() => setPage((current) => Math.min(current + 1, Math.max(pages - 1, 0)))}
+        />
       </div>
     </div>
   )

@@ -1,9 +1,12 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Link } from '@tanstack/react-router'
 import { ArrowRight } from 'lucide-react'
-import { flexRender, getCoreRowModel, getSortedRowModel, useReactTable, type ColumnDef, type SortingState } from '@tanstack/react-table'
+import { flexRender, getCoreRowModel, getPaginationRowModel, getSortedRowModel, useReactTable, type ColumnDef, type PaginationState, type SortingState } from '@tanstack/react-table'
 import type { Anomaly } from '../api'
 import { ConfidenceBadge, SeverityBadge, TypeBadge } from '../components/badges'
+import { DateRangeFilter } from '../components/DateRangeFilter'
+import { rangeBounds } from '../components/dateRange'
+import { PaginationControls } from '../components/PaginationControls'
 import { SortButton } from '../components/SortButton'
 
 const columns: ColumnDef<Anomaly>[] = [
@@ -27,11 +30,45 @@ const columns: ColumnDef<Anomaly>[] = [
 
 export function AnomalyTable({ anomalies }: { anomalies: Anomaly[] }) {
   const [sorting, setSorting] = useState<SortingState>([])
+  const [pagination, setPagination] = useState<PaginationState>({ pageIndex: 0, pageSize: 10 })
+  const [from, setFrom] = useState('')
+  const [to, setTo] = useState('')
+  // An episode overlaps the range when it ends at or after the start and
+  // starts at or before the end, so a long episode is never hidden for
+  // starting before Desde. Memoized so the page only resets when the rows
+  // actually change, not on every render.
+  const visible = useMemo(() => {
+    const { start, end } = rangeBounds(from, to)
+    return anomalies.filter((anomaly) => {
+      const episodeStart = new Date(anomaly.window_start).getTime()
+      const episodeEnd = new Date(anomaly.window_end).getTime()
+      return episodeStart <= end && episodeEnd >= start
+    })
+  }, [anomalies, from, to])
   // The API orders by operational urgency, not by raw confidence across types.
   // eslint-disable-next-line react-hooks/incompatible-library
-  const table = useReactTable({ data: anomalies, columns, state: { sorting }, onSortingChange: setSorting,
-    getCoreRowModel: getCoreRowModel(), getSortedRowModel: getSortedRowModel() })
-  return <div className="overflow-x-auto"><table className="min-w-full">
+  const table = useReactTable({ data: visible, columns,
+    state: { sorting, pagination },
+    onSortingChange: (update) => {
+      setSorting(update)
+      setPagination((current) => ({ ...current, pageIndex: 0 }))
+    },
+    onPaginationChange: setPagination,
+    getCoreRowModel: getCoreRowModel(), getSortedRowModel: getSortedRowModel(),
+    getPaginationRowModel: getPaginationRowModel(),
+  })
+  return <>
+    <DateRangeFilter prefix="hallazgos" from={from} to={to}
+      onFromChange={(value) => { setFrom(value); setPagination((current) => ({ ...current, pageIndex: 0 })) }}
+      onToChange={(value) => { setTo(value); setPagination((current) => ({ ...current, pageIndex: 0 })) }}
+      onClear={() => { setFrom(''); setTo(''); setPagination((current) => ({ ...current, pageIndex: 0 })) }} />
+    {(from || to) && (
+      <p className="muted" role="status">{visible.length} de {anomalies.length} hallazgos en el rango.</p>
+    )}
+    {visible.length === 0 ? (
+      <p className="empty">No hay hallazgos en el rango elegido.</p>
+    ) : (
+    <div className="overflow-x-auto"><table className="min-w-full">
     <thead>{table.getHeaderGroups().map((group) => <tr key={group.id}>{group.headers.map((header) =>
       <th key={header.id} aria-sort={header.column.getIsSorted() === 'asc' ? 'ascending' : header.column.getIsSorted() === 'desc' ? 'descending' : 'none'}>
         {header.column.getCanSort() ? (
@@ -48,4 +85,14 @@ export function AnomalyTable({ anomalies }: { anomalies: Anomaly[] }) {
       {row.getVisibleCells().map((cell) => <td key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</td>)}
     </tr>)}</tbody>
   </table></div>
+    )}
+  <PaginationControls
+    page={table.getState().pagination.pageIndex}
+    pages={table.getPageCount()}
+    total={visible.length}
+    unit="hallazgos"
+    onPrevious={() => table.previousPage()}
+    onNext={() => table.nextPage()}
+  />
+  </>
 }

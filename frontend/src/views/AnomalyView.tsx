@@ -1,5 +1,6 @@
 import { Link } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
+import { useState } from 'react'
 import { api } from '../api'
 import { ConsumptionChart } from '../components/ConsumptionChart'
 import {
@@ -8,6 +9,9 @@ import {
   StatusBadge,
   TypeBadge,
 } from '../components/badges'
+import { DateRangeFilter } from '../components/DateRangeFilter'
+import { rangeBounds } from '../components/dateRange'
+import { PaginationControls } from '../components/PaginationControls'
 import { formatDateTime, formatKWh, formatNumber, formatPercent } from '../components/format'
 
 const variableLabel: Record<string, string> = {
@@ -29,6 +33,10 @@ const eventLabel: Record<string, string> = {
 }
 
 export function AnomalyView({ anomalyId }: { anomalyId: number }) {
+  const [from, setFrom] = useState('')
+  const [to, setTo] = useState('')
+  const [page, setPage] = useState(0)
+  const pageSize = 10
   const anomalyQuery = useQuery({
     queryKey: ['anomaly', anomalyId],
     queryFn: () => api.anomaly(anomalyId),
@@ -44,6 +52,19 @@ export function AnomalyView({ anomalyId }: { anomalyId: number }) {
 
   const basis = anomaly.confidence_basis
   const series = anomaly.deviation_series
+  const { start: fromMs, end: toMs } = rangeBounds(from, to)
+  const visibleFindings = (anomaly.findings ?? []).filter((finding) => {
+    const at = new Date(finding.timestamp).getTime()
+    return at >= fromMs && at <= toMs
+  })
+  const pages = Math.ceil(visibleFindings.length / pageSize)
+  const pageRows = visibleFindings.slice(page * pageSize, page * pageSize + pageSize)
+  function changeRange(setter: (value: string) => void) {
+    return (value: string) => {
+      setter(value)
+      setPage(0)
+    }
+  }
 
   return (
     <div>
@@ -204,9 +225,15 @@ export function AnomalyView({ anomalyId }: { anomalyId: number }) {
         {anomaly.findings && anomaly.findings.length > 0 && (
           <div className="card">
             <h2>Hallazgos de calidad de datos</h2>
+            <DateRangeFilter prefix="calidad" from={from} to={to}
+              onFromChange={changeRange(setFrom)} onToChange={changeRange(setTo)}
+              onClear={() => { setFrom(''); setTo(''); setPage(0) }} />
+            {visibleFindings.length === 0 ? (
+              <p className="empty">No hay hallazgos en el rango elegido.</p>
+            ) : (
             <table>
               <tbody>
-                {anomaly.findings.map((finding) => (
+                {pageRows.map((finding) => (
                   <tr key={`${finding.timestamp}-${finding.variable}`}>
                     <td className="mono">{formatDateTime(finding.timestamp)}</td>
                     <td>{variableLabel[finding.variable] ?? finding.variable.replaceAll('_', ' ')}: {formatNumber(finding.value, 2)} frente a {formatNumber(finding.expected, 2)} esperados</td>
@@ -214,6 +241,15 @@ export function AnomalyView({ anomalyId }: { anomalyId: number }) {
                 ))}
               </tbody>
             </table>
+            )}
+            <PaginationControls
+              page={Math.min(page, Math.max(pages - 1, 0))}
+              pages={pages}
+              total={visibleFindings.length}
+              unit="hallazgos"
+              onPrevious={() => setPage((current) => Math.max(current - 1, 0))}
+              onNext={() => setPage((current) => Math.min(current + 1, Math.max(pages - 1, 0)))}
+            />
             <p className="muted" style={{ marginBottom: 0 }}>
               {formatNumber(anomaly.affected_readings)} lecturas requieren validación.
             </p>

@@ -2,12 +2,13 @@ import { useState } from 'react'
 import { Link } from '@tanstack/react-router'
 import { ChevronDown, Search } from 'lucide-react'
 import {
-  flexRender, getCoreRowModel, getFilteredRowModel, getSortedRowModel, useReactTable,
-  type ColumnDef, type ColumnFiltersState, type SortingState,
+  flexRender, getCoreRowModel, getFilteredRowModel, getPaginationRowModel, getSortedRowModel, useReactTable,
+  type ColumnDef, type ColumnFiltersState, type PaginationState, type SortingState,
 } from '@tanstack/react-table'
 import type { Health, Meter, Severity } from '../api'
 import { HealthBadge, SeverityBadge } from '../components/badges'
 import { SortButton } from '../components/SortButton'
+import { PaginationControls } from '../components/PaginationControls'
 import { formatNumber, formatPercent } from '../components/format'
 
 const severityRank: Record<string, number> = { HIGH: 0, MEDIUM: 1, LOW: 2 }
@@ -50,12 +51,22 @@ const columns: ColumnDef<Meter>[] = [
 export function MeterTable({ meters }: { meters: Meter[] }) {
   const [sorting, setSorting] = useState<SortingState>([])
   const [filters, setFilters] = useState<ColumnFiltersState>([])
+  const [pagination, setPagination] = useState<PaginationState>({ pageIndex: 0, pageSize: 10 })
   // TanStack Table owns mutable table functions; React Compiler must not memoize them.
   // eslint-disable-next-line react-hooks/incompatible-library
   const table = useReactTable({
-    data: meters, columns, state: { sorting, columnFilters: filters },
-    onSortingChange: setSorting, onColumnFiltersChange: setFilters,
-    getCoreRowModel: getCoreRowModel(), getFilteredRowModel: getFilteredRowModel(), getSortedRowModel: getSortedRowModel(),
+    data: meters, columns, state: { sorting, columnFilters: filters, pagination },
+    onSortingChange: (update) => {
+      setSorting(update)
+      setPagination((current) => ({ ...current, pageIndex: 0 }))
+    },
+    onColumnFiltersChange: (update) => {
+      setFilters(update)
+      setPagination((current) => ({ ...current, pageIndex: 0 }))
+    },
+    onPaginationChange: setPagination,
+    getCoreRowModel: getCoreRowModel(), getFilteredRowModel: getFilteredRowModel(),
+    getSortedRowModel: getSortedRowModel(), getPaginationRowModel: getPaginationRowModel(),
   })
   const health = (table.getColumn('health')?.getFilterValue() as string | undefined) ?? ''
   return <>
@@ -102,6 +113,14 @@ export function MeterTable({ meters }: { meters: Meter[] }) {
         </tr>)}</tbody>
       </table>
       {table.getRowModel().rows.length === 0 && <p className="empty">No hay medidores que coincidan con la búsqueda o el filtro.</p>}
+      <PaginationControls
+        page={table.getState().pagination.pageIndex}
+        pages={table.getPageCount()}
+        total={table.getFilteredRowModel().rows.length}
+        unit="medidores"
+        onPrevious={() => table.previousPage()}
+        onNext={() => table.nextPage()}
+      />
     </div>
   </>
 }
