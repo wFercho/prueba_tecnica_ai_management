@@ -265,11 +265,3 @@ make vet
 cd frontend && pnpm build && pnpm lint
 make smoke             # contrato autenticado, solo lectura: NO lanza el primer análisis
 ```
-
-Con una pila **aislada** o después del recorrido manual, ejecuta
-`SMOKE_ANALYZE=1 make smoke` para verificar los cuatro episodios y el contrato
-completo. No lo uses antes de enseñar el botón en la BD de demo. Las pruebas SQL
-usan una base descartable separada y nunca borran el volumen de la demo.
-
-Las decisiones de dominio están en `CONTEXT.md` y `docs/adr/`; los tickets y la spec
-en `.scratch/energy-management-mvp/`.
